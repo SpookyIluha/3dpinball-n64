@@ -1,39 +1,28 @@
 # 3D Pinball - Space Cadet (Nintendo 64 / libdragon)
 
-N64-focused port of the Space Cadet pinball decompilation, using libdragon runtime and asset pipeline.
+N64 port of the Space Cadet pinball decompilation, using libdragon runtime and asset pipeline.
+Made from the Dreamcast version as a base. Plays Space Cadet only currently.
 
-## Current scope (v1)
-- Space Cadet table only (`PINBALL.DAT`)
-- Software renderer blitted to `640x480x16` framebuffer
-- Fixed `60 Hz` update loop
-- Music via `xm64player` (`PINBALL.xm64`)
-- SFX via `wav64` + mixer channels
-- EEPROMFS persistence for options + highscores
+Requires Expansion Pak to run.
+
+<img width="632" height="504" alt="image" src="https://github.com/user-attachments/assets/1e32b537-c395-4db2-bc46-6b1b9037cccf" />
+
+
+## Features
+1. EEPROM support
+2. Rumble Pak support
 
 ## Build
-This project expects libdragon and uses `n64.mk`.
+This project requires libdragon to be installed.
 
-1. Put assets in `assets/`.
+1. Put assets from your space-cadet game (PINBALL.DAT, PINBALL2.MID, .WAV files) in `assets/`.
 2. Build:
 
 ```sh
 libdragon make
 ```
 
-Output ROM:
-- `3dpinball-n64.z64`
-
-## Asset pipeline
-- `.xm/.XM` -> `.xm64` via `audioconv64`
-- `.wav/.WAV` -> `.wav64` via `audioconv64 --wav-compress 1`
-- other files from `assets/` are copied into `filesystem/`
-- DFS is packaged into ROM (`build/3dpinball-n64.dfs`) and read at runtime via `rom:/`
-
-Required assets checked at build time:
-- `assets/PINBALL.DAT`
-- `assets/PINBALL.xm` (or `PINBALL.XM`)
-
-## Controls (N64)
+## Controls
 - Left flipper: `D-Left` or `L`
 - Right flipper: `D-Right` or `R`
 - Launch ball: `A` or `D-Down`
@@ -44,8 +33,5 @@ Required assets checked at build time:
 
 ## Save data
 - EEPROM save type default: `eeprom4k` (set in Makefile)
-- EEPROMFS files:
-  - `/pinball/options.bin`
-  - `/pinball/highscores.bin`
 
 If EEPROM is unavailable, the game runs without persistence.
