@@ -1,128 +1,38 @@
 #include "pch.h"
-#include "loader.h"
 #include "Sound.h"
-#include "winmain.h"
 
-#define DR_WAV_IMPLEMENTATION
-#include "dr_wav.h"
+namespace
+{
+	constexpr int MaxMixerChannels = 32;
+	constexpr int DefaultMusicChannels = 16;
+	constexpr float SfxVolume = 0.30f;
 
-#include <kos.h>
-#include <dc/sound/aica_comm.h>
-#include <dc/sound/sound.h>
-#include <dc/sound/sfxmgr.h>
+	struct WavHandle
+	{
+		std::string Path;
+		int SampleCount;
+		int SampleRate;
+		float DurationSec;
+	};
 
-int Sound::num_channels;
+	struct ChannelState
+	{
+		wav64_t* Wave;
+	};
+
+	ChannelState ChannelStates[MaxMixerChannels]{};
+}
+
+int Sound::num_channels = 0;
 bool Sound::enabled_flag = false;
-int* Sound::TimeStamps = nullptr;
-
-/*
- *    temporary band-aid fix for loading 8-bit mono PCM samples
- *    they appear to not be loaded correctly through KOS' snd_sfx_load() function
- *    most of this code is from snd_sfxmgr.c with some modifications
- *    (https://github.com/KallistiOS/KallistiOS/blob/master/kernel/arch/dreamcast/sound/snd_sfxmgr.c)
- */
-
-struct snd_effect;
-LIST_HEAD(selist, snd_effect);
-
-extern struct selist snd_effects;
-	
-typedef struct snd_effect {
-    uint32_t  locl, locr;
-    uint32_t  len;
-    uint32_t  rate;
-    uint32_t  used;
-    uint32_t  fmt;
-    uint16_t  stereo;
-
-    LIST_ENTRY(snd_effect)  list;
-} snd_effect_t;
-
-static snd_effect_t *create_snd_effect(drwav *wavhdr, uint8_t *wav_data) {
-    snd_effect_t *effect;
-    uint32_t len, rate;
-    uint16_t channels;
-    
-    effect = (snd_effect_t*)malloc(sizeof(snd_effect_t));
-    if(effect == NULL)
-        return NULL;
-
-    memset(effect, 0, sizeof(snd_effect_t));
-
-    channels = wavhdr->fmt.channels;
-    rate = wavhdr->fmt.sampleRate;
-    len = wavhdr->dataChunkDataSize*2;
-
-    effect->rate = rate;
-    effect->stereo = channels > 1;
-
-	// just hardcode this for now. the game's sounds are 8-bit mono samples,
-	// which are then converted to 16-bit mono by dr_wav
-	effect->fmt = AICA_SM_16BIT;
-	effect->len = len / 2;
-
-	effect->locl = snd_mem_malloc(len);
-	if(effect->locl)
-		spu_memload_sq(effect->locl, wav_data, len);
-
-	effect->locr = 0;
-	return effect;
-}
-
-static sfxhnd_t snd_sfx_load_alt(const char *fn) {
-    drwav wavfp;
-    snd_effect_t *effect;
-
-    if (!drwav_init_file(&wavfp, fn, NULL))
-		return SFXHND_INVALID;
-
-    int16_t* pSampleData = new int16_t[wavfp.totalPCMFrameCount * wavfp.channels];
-	if (pSampleData == 0)
-	{
-		drwav_uninit(&wavfp);
-		return SFXHND_INVALID;
-	}
-
-	uint32_t totalRead = drwav_read_pcm_frames(&wavfp, wavfp.totalPCMFrameCount, pSampleData);
-	if (!totalRead)
-	{
-		drwav_uninit(&wavfp);
-		delete[] pSampleData;
-		return SFXHND_INVALID;
-	}
-
-	if (wavfp.bitsPerSample == 8) // 8 bit
-	{
-		int16_t* _8bitdata = new int16_t[wavfp.totalPCMFrameCount * wavfp.channels];
-		drwav_u8_to_s16((drwav_int16*)_8bitdata, (drwav_uint8*)pSampleData, wavfp.totalPCMFrameCount);
-		delete[] pSampleData;
-		pSampleData = _8bitdata;
-	}
-
-    /* Create and initialize sound effect */
-    effect = create_snd_effect(&wavfp, (uint8_t*)pSampleData);
-    if(!effect) {
-		drwav_uninit(&wavfp);
-        delete[] pSampleData;
-        return SFXHND_INVALID;
-    }
-
-    /* Finish up and return the sound effect handle */
-	delete[] pSampleData;
-	drwav_uninit(&wavfp);
-
-    LIST_INSERT_HEAD(&snd_effects, effect, list);
-
-    return (sfxhnd_t)effect;
-}
-
+int Sound::sfx_channel_start = DefaultMusicChannels;
+int Sound::sfx_channel_count = 1;
+int Sound::next_sfx_channel = 0;
 
 bool Sound::Init(int channels, bool enableFlag)
 {
-	snd_init();
-
-	SetChannels(channels);
 	Enable(enableFlag);
+	SetChannels(channels);
 	return true;
 }
 
@@ -133,43 +43,31 @@ void Sound::Enable(bool enableFlag)
 
 void Sound::Activate()
 {
-	
+	enabled_flag = true;
 }
 
 void Sound::Deactivate()
 {
-	
+	enabled_flag = false;
 }
 
 void Sound::Close()
 {
-	snd_sfx_unload_all();
-	snd_shutdown();
-
-	delete[] TimeStamps;
-	TimeStamps = nullptr;
+	for (int i = 0; i < MaxMixerChannels; i++)
+	{
+		if (ChannelStates[i].Wave)
+		{
+			wav64_close(ChannelStates[i].Wave);
+			ChannelStates[i].Wave = nullptr;
+		}
+	}
+	enabled_flag = false;
 }
 
-void Sound::PlaySound(uint8_t* buf, int time, int size, int samplerate)
+void Sound::SetMusicChannelsUsed(int channels)
 {
-	if (!enabled_flag || !buf) return;
-	int channel = snd_sfx_play((sfxhnd_t)buf, 255, 128);
-	if (channel >= 0)
-		TimeStamps[channel] = time;
-}
-
-uint8_t* Sound::LoadWaveFile(const std::string& lpName)
-{
-	sfxhnd_t snd = snd_sfx_load_alt(lpName.c_str());
-	if (!snd)
-		printf("Failed to load sound '%s'\n", lpName.c_str());
-	return (uint8_t*)snd;
-}
-
-void Sound::FreeSound(uint8_t* wave)
-{
-	if (wave)
-		snd_sfx_unload((sfxhnd_t)wave);
+	sfx_channel_start = std::max(0, std::min(MaxMixerChannels - 1, channels));
+	SetChannels(num_channels <= 0 ? 8 : num_channels);
 }
 
 void Sound::SetChannels(int channels)
@@ -178,6 +76,121 @@ void Sound::SetChannels(int channels)
 		channels = 8;
 
 	num_channels = channels;
-	delete[] TimeStamps;
-	TimeStamps = new int[num_channels]();
+	const int available = std::max(1, MaxMixerChannels - sfx_channel_start);
+	sfx_channel_count = std::max(1, std::min(channels, available));
+	next_sfx_channel = 0;
+	for (int i = sfx_channel_start; i < sfx_channel_start + sfx_channel_count; i++)
+	{
+		mixer_ch_set_vol(i, SfxVolume, SfxVolume);
+	}
+	debugf("Sound: configured SFX channels start=%d count=%d\n", sfx_channel_start, sfx_channel_count);
+}
+
+void Sound::PlaySound(uint8_t* buf, int time, int size, int samplerate)
+{
+	(void)time;
+	(void)size;
+	(void)samplerate;
+	if (!enabled_flag || !buf)
+		return;
+
+	auto* handle = reinterpret_cast<WavHandle*>(buf);
+	if (handle->Path.empty())
+		return;
+
+	// Free finished one-shot waves to keep heap bounded.
+	for (int i = sfx_channel_start; i < sfx_channel_start + sfx_channel_count; i++)
+	{
+		if (ChannelStates[i].Wave && !mixer_ch_playing(i))
+		{
+			wav64_close(ChannelStates[i].Wave);
+			ChannelStates[i].Wave = nullptr;
+		}
+	}
+
+	const int channel = sfx_channel_start + next_sfx_channel;
+	next_sfx_channel = (next_sfx_channel + 1) % sfx_channel_count;
+
+	if (ChannelStates[channel].Wave)
+	{
+		wav64_close(ChannelStates[channel].Wave);
+		ChannelStates[channel].Wave = nullptr;
+	}
+
+	wav64_loadparms_t parms{};
+	parms.streaming_mode = WAV64_STREAMING_NONE;
+
+	auto* wave = wav64_load(handle->Path.c_str(), &parms);
+	if (!wave)
+	{
+		debugf("Sound: failed to load SFX for play '%s'\n", handle->Path.c_str());
+		return;
+	}
+
+	wav64_set_loop(wave, false);
+	wav64_play(wave, channel);
+	mixer_ch_set_vol(channel, SfxVolume, SfxVolume);
+	ChannelStates[channel].Wave = wave;
+}
+
+uint8_t* Sound::LoadWaveFile(const std::string& lpName)
+{
+	auto testFile = fopen(lpName.c_str(), "rb");
+	if (!testFile)
+	{
+		debugf("Sound: missing wav64 '%s'\n", lpName.c_str());
+		return nullptr;
+	}
+	fclose(testFile);
+
+	auto* handle = new WavHandle{};
+	handle->Path = lpName;
+	handle->SampleCount = 0;
+	handle->SampleRate = 0;
+	handle->DurationSec = 0.0f;
+
+	// Probe metadata without retaining a long-lived open stream.
+	wav64_loadparms_t probeParms{};
+	probeParms.streaming_mode = WAV64_STREAMING_FULL;
+	auto* probe = wav64_load(lpName.c_str(), &probeParms);
+	if (!probe)
+	{
+		debugf("Sound: wav64_load probe failed '%s'\n", lpName.c_str());
+		delete handle;
+		return nullptr;
+	}
+	handle->SampleCount = probe->wave.len;
+	handle->SampleRate = static_cast<int>(probe->wave.frequency);
+	handle->DurationSec = handle->SampleRate > 0
+		? static_cast<float>(handle->SampleCount / static_cast<double>(handle->SampleRate))
+		: 0.0f;
+	wav64_close(probe);
+
+	return reinterpret_cast<uint8_t*>(handle);
+}
+
+void Sound::FreeSound(uint8_t* wave)
+{
+	if (!wave)
+		return;
+
+	auto* handle = reinterpret_cast<WavHandle*>(wave);
+	delete handle;
+}
+
+bool Sound::QuerySoundInfo(uint8_t* buf, int* sampleCount, int* sampleRate, float* durationSec)
+{
+	if (!buf)
+		return false;
+	auto* handle = reinterpret_cast<WavHandle*>(buf);
+	if (handle->Path.empty())
+		return false;
+
+	if (sampleCount)
+		*sampleCount = handle->SampleCount;
+	if (sampleRate)
+		*sampleRate = handle->SampleRate;
+	if (durationSec)
+		*durationSec = handle->DurationSec;
+	return true;
 }

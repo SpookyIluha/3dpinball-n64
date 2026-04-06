@@ -25,7 +25,7 @@
 #include "score.h"
 #include "TPinballTable.h"
 #include "TTextBox.h"
-#include "dc_input.h"
+#include "n64_input.h"
 
 TPinballTable* pb::MainTable = nullptr;
 DatFile* pb::record_table = nullptr;
@@ -371,30 +371,30 @@ void pb::keyup()
 	if (game_mode != 1 || winmain::single_step || demo_mode)
 		return;
 
-	if (dc_input::MoveLeftPaddleUp())
+	if (n64_input::MoveLeftPaddleUp())
 	{
 		MainTable->Message(1001, time_now);
 	}
 
-	if (dc_input::MoveRightPaddleUp())
+	if (n64_input::MoveRightPaddleUp())
 	{
 		MainTable->Message(1003, time_now);
 	}
 
-	if (dc_input::LaunchBallUp())
+	if (n64_input::LaunchBallUp())
 	{
 		MainTable->Message(1005, time_now);
 	}
 
-	if (dc_input::NudgeRightUp())
+	if (n64_input::NudgeRightUp())
 	{
 		nudge::un_nudge_right(0, nullptr);
 	}
-	else if (dc_input::NudgeLeftUp())
+	else if (n64_input::NudgeLeftUp())
 	{
 		nudge::un_nudge_left(0, nullptr);
 	}
-	else if (dc_input::NudgeUpUp())
+	else if (n64_input::NudgeUpUp())
 	{
 		nudge::un_nudge_up(0, nullptr);
 	}
@@ -413,34 +413,34 @@ void pb::keydown()
 
 	// control::pbctrl_bdoor_controller(static_cast<char>(key));
 
-	if (dc_input::MoveLeftPaddleDown())
+	if (n64_input::MoveLeftPaddleDown())
 	{
 		MainTable->Message(1000, time_now);
 	}
 
-	if (dc_input::MoveRightPaddleDown())
+	if (n64_input::MoveRightPaddleDown())
 	{
 		MainTable->Message(1002, time_now);
 	}
 
-	if (dc_input::LaunchBallDown())
+	if (n64_input::LaunchBallDown())
 	{
 		MainTable->Message(1004, time_now);
 	}
 
-	if (dc_input::NudgeRightDown())
+	if (n64_input::NudgeRightDown())
 	{
 		if (!MainTable->TiltLockFlag)
 			nudge::nudge_right();
 	}
 
-	if (dc_input::NudgeLeftDown())
+	if (n64_input::NudgeLeftDown())
 	{
 		if (!MainTable->TiltLockFlag)
 			nudge::nudge_left();
 	}
 
-	if (dc_input::NudgeUpDown())
+	if (n64_input::NudgeUpDown())
 	{
 		if (!MainTable->TiltLockFlag)
 			nudge::nudge_up();

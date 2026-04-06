@@ -1,6 +1,6 @@
 #pragma once
 
-class dc_input
+class n64_input
 {
 public:
     static void Initialize();
@@ -30,11 +30,11 @@ public:
     static bool Button2();
 
 private:
-    static unsigned int dcButtonsDown;
-    static unsigned int dcButtonsUp;
-    static unsigned int dcButtonsHeld;
-    static bool dcLeftTriggerDown;
-    static bool dcLeftTriggerUp;
-    static bool dcRightTriggerDown;
-    static bool dcRightTriggerUp;
+    static unsigned int n64ButtonsDown;
+    static unsigned int n64ButtonsUp;
+    static unsigned int n64ButtonsHeld;
+    static bool n64LeftTriggerDown;
+    static bool n64LeftTriggerUp;
+    static bool n64RightTriggerDown;
+    static bool n64RightTriggerUp;
 };

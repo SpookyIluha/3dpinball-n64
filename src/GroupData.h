@@ -121,9 +121,9 @@ public:
 	char* field_labeled(LPCSTR lpString, FieldTypes fieldType);
 	gdrv_bitmap8* GetBitmap(int groupIndex);
 	zmap_header_type* GetZMap(int groupIndex);
-	MsgFont *ReadPEMsgFontResource(const std::string peName);
+	MsgFont *ReadPEMsgFontResource(const std::string peName, uint32_t* outSize = nullptr);
 	void Finalize();
 
 private:
-	void AddMsgFont(MsgFont* font, const std::string& fontName, const bool changePaletteIndices);
+	void AddMsgFont(MsgFont* font, uint32_t fontDataSize, const std::string& fontName, const bool changePaletteIndices);
 };

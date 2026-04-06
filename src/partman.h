@@ -2,6 +2,7 @@
 
 struct zmap_header_type;
 struct gdrv_bitmap8;
+enum class FieldTypes : int16_t;
 
 
 enum class bmp8Flags : unsigned char
@@ -62,12 +63,31 @@ public:
 	static class DatFile* load_records(LPCSTR lpFileName, bool fullTiltMode);
 private:
 	static short _field_size[];
+	static void NormalizeEntryBuffer(FieldTypes entryType, char* buffer, size_t fieldSize);
+	static uint16_t ReadLe16(uint16_t value);
+	static uint32_t ReadLe32(uint32_t value);
 
 	template <typename T>
 	static T LRead(FILE* file)
 	{
 		T Buffer{};
 		fread(&Buffer, 1, sizeof(T), file);
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+		if constexpr (sizeof(T) == 2)
+		{
+			uint16_t raw;
+			std::memcpy(&raw, &Buffer, sizeof(raw));
+			raw = ReadLe16(raw);
+			std::memcpy(&Buffer, &raw, sizeof(raw));
+		}
+		else if constexpr (sizeof(T) == 4)
+		{
+			uint32_t raw;
+			std::memcpy(&raw, &Buffer, sizeof(raw));
+			raw = ReadLe32(raw);
+			std::memcpy(&Buffer, &raw, sizeof(raw));
+		}
+#endif
 		return Buffer;
 	}
 };

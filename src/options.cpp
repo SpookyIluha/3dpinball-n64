@@ -4,6 +4,7 @@
 #include "midi.h"
 #include "Sound.h"
 #include "winmain.h"
+#include "n64_save.h"
 
 constexpr int options::MaxUps, options::MaxFps, options::MinUps, options::MinFps, options::DefUps, options::DefFps;
 constexpr int options::MaxSoundChannels, options::MinSoundChannels, options::DefSoundChannels;
@@ -33,23 +34,23 @@ void options::init()
 	Options.KeyDft.BottomTableBump = 0;
 	Options.Key = Options.KeyDft;
 
-	Options.Sounds = get_int("Sounds", true);
-	Options.Music = get_int("Music", true);
-	Options.Players = get_int("Players", 1);
-	Options.Key.LeftFlipper = get_int("Left Flipper key", Options.Key.LeftFlipper);
-	Options.Key.RightFlipper = get_int("Right Flipper key", Options.Key.RightFlipper);
-	Options.Key.Plunger = get_int("Plunger key", Options.Key.Plunger);
-	Options.Key.LeftTableBump = get_int("Left Table Bump key", Options.Key.LeftTableBump);
-	Options.Key.RightTableBump = get_int("Right Table Bump key", Options.Key.RightTableBump);
-	Options.Key.BottomTableBump = get_int("Bottom Table Bump key", Options.Key.BottomTableBump);
-	Options.UniformScaling = get_int("Uniform scaling", true);
-	Options.LinearFiltering = get_int("Linear Filtering", true);
-	Options.FramesPerSecond = std::min(MaxFps, std::max(MinUps, get_int("Frames Per Second", DefFps)));
-	Options.UpdatesPerSecond = std::min(MaxUps, std::max(MinUps, get_int("Updates Per Second", DefUps)));
+	Options.Sounds = true;
+	Options.Music = true;
+	Options.Players = 1;
+	Options.UniformScaling = true;
+	Options.LinearFiltering = true;
+	Options.FramesPerSecond = DefFps;
+	Options.UpdatesPerSecond = DefUps;
+	Options.ShowMenu = true;
+	Options.UncappedUpdatesPerSecond = false;
+	Options.SoundChannels = DefSoundChannels;
+
+	n64_save::LoadOptions(Options);
+
+	Options.Players = std::min(4, std::max(1, Options.Players));
+	Options.FramesPerSecond = std::min(MaxFps, std::max(MinFps, Options.FramesPerSecond));
+	Options.UpdatesPerSecond = std::min(MaxUps, std::max(MinUps, Options.UpdatesPerSecond));
 	Options.UpdatesPerSecond = std::max(Options.UpdatesPerSecond, Options.FramesPerSecond);
-	Options.ShowMenu = get_int("ShowMenu", true);
-	Options.UncappedUpdatesPerSecond = get_int("Uncapped Updates Per Second", false);
-	Options.SoundChannels = get_int("Sound Channels", DefSoundChannels);
 	Options.SoundChannels = std::min(MaxSoundChannels, std::max(MinSoundChannels, Options.SoundChannels));
 
 	winmain::UpdateFrameRate();
@@ -57,22 +58,8 @@ void options::init()
 
 void options::uninit()
 {
-	set_int("Sounds", Options.Sounds);
-	set_int("Music", Options.Music);
-	set_int("Players", Options.Players);
-	set_int("Left Flipper key", Options.Key.LeftFlipper);
-	set_int("Right Flipper key", Options.Key.RightFlipper);
-	set_int("Plunger key", Options.Key.Plunger);
-	set_int("Left Table Bump key", Options.Key.LeftTableBump);
-	set_int("Right Table Bump key", Options.Key.RightTableBump);
-	set_int("Bottom Table Bump key", Options.Key.BottomTableBump);
-	set_int("Uniform scaling", Options.UniformScaling);
-	set_int("Linear Filtering", Options.LinearFiltering);
-	set_int("Frames Per Second", Options.FramesPerSecond);
-	set_int("Updates Per Second", Options.UpdatesPerSecond);
-	set_int("ShowMenu", Options.ShowMenu);
-	set_int("Uncapped Updates Per Second", Options.UncappedUpdatesPerSecond);
-	set_int("Sound Channels", Options.SoundChannels);
+	n64_save::SaveOptions(Options);
+	n64_save::PumpWrites();
 }
 
 

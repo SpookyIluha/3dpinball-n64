@@ -2,7 +2,7 @@
 
 #include <string>
 
-class dc_graphics
+class n64_graphics
 {
 public:
     static void Initialize();
@@ -12,7 +12,4 @@ public:
 
 	static void UpdateFull();
 	static void Update();
-
-private:
-	static uint16_t* splash_raw;
 };

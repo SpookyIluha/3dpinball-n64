@@ -9,6 +9,39 @@
 #include "winmain.h"
 #include "zdrv.h"
 
+namespace
+{
+	constexpr float FallbackMsgFontScaleX = 1.0f;
+	constexpr float FallbackMsgFontScaleY = 1.0f;
+
+	inline uint16_t ReadLe16(uint16_t value)
+	{
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+		return static_cast<uint16_t>((value >> 8) | (value << 8));
+#else
+		return value;
+#endif
+	}
+
+	inline int16_t ReadLeI16(int16_t value)
+	{
+		auto raw = static_cast<uint16_t>(value);
+		raw = ReadLe16(raw);
+		return static_cast<int16_t>(raw);
+	}
+
+	void NormalizeMsgFontHeader(MsgFont* font)
+	{
+		if (!font)
+			return;
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+		font->GapWidth = ReadLeI16(font->GapWidth);
+		font->Unknown1 = ReadLeI16(font->Unknown1);
+		font->Height = ReadLeI16(font->Height);
+#endif
+	}
+}
+
 
 EntryData::~EntryData()
 {
@@ -281,7 +314,7 @@ zmap_header_type* DatFile::GetZMap(int groupIndex)
 	return group->GetZMap(fullscrn::GetResolution());
 }
 
-MsgFont *DatFile::ReadPEMsgFontResource(const std::string peName)
+MsgFont *DatFile::ReadPEMsgFontResource(const std::string peName, uint32_t* outSize)
 {
 	auto file = pinball::make_path_name(peName);
 	auto fileHandle = fopen(file.c_str(), "rb");
@@ -424,12 +457,19 @@ MsgFont *DatFile::ReadPEMsgFontResource(const std::string peName)
 	uint32_t dataOffset, dataSize;
 	fread(&dataOffset, sizeof(uint32_t), 1, fileHandle);
 	fread(&dataSize, sizeof(uint32_t), 1, fileHandle);
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+	dataOffset = (dataOffset >> 24) | ((dataOffset << 8) & 0x00FF0000) | ((dataOffset >> 8) & 0x0000FF00) |
+		(dataOffset << 24);
+	dataSize = (dataSize >> 24) | ((dataSize << 8) & 0x00FF0000) | ((dataSize >> 8) & 0x0000FF00) | (dataSize << 24);
+#endif
 
 	fseek(fileHandle, (rsrcSectionDataOffset - rsrcSectionVirtualAddress) + dataOffset, SEEK_SET);
 	MsgFont *msgFont = reinterpret_cast<MsgFont *>(new uint8_t[dataSize]);
 	fread(msgFont, 1, dataSize, fileHandle);
 
 	fclose(fileHandle);
+	if (outSize)
+		*outSize = dataSize;
 
 	return msgFont;
 }
@@ -441,11 +481,15 @@ void DatFile::Finalize()
 		int groupIndex = record_labeled("pbmsg_ft");
 		assertm(groupIndex < 0, "DatFile: pbmsg_ft is already in .dat");
 
-		MsgFont *rcData = ReadPEMsgFontResource("pinball.exe");
+		uint32_t rcSize = 0;
+		MsgFont *rcData = ReadPEMsgFontResource("pinball.exe", &rcSize);
 
 		if (rcData != nullptr)
 		{
-			AddMsgFont(rcData, "pbmsg_ft", false);
+			NormalizeMsgFontHeader(rcData);
+			debugf("DatFile::Finalize: using pinball.exe font, size=%lu height=%d gap=%d\n",
+				static_cast<unsigned long>(rcSize), rcData->Height, rcData->GapWidth);
+			AddMsgFont(rcData, rcSize, "pbmsg_ft", false);
 		}
 		else
 		{
@@ -466,12 +510,15 @@ void DatFile::Finalize()
 			fseek(fileHandle, 0, SEEK_SET);
 			fread(rcData, 1, fileSize, fileHandle);
 			fclose(fileHandle);
+			NormalizeMsgFontHeader(rcData);
+			debugf("DatFile::Finalize: using PINBALL2.MID font, size=%lu height=%d gap=%d\n",
+				static_cast<unsigned long>(fileSize), rcData->Height, rcData->GapWidth);
 
 			auto groupId = Groups.back()->GroupId + 1u;
-			AddMsgFont(rcData, "pbmsg_ft", true);
+			AddMsgFont(rcData, fileSize, "pbmsg_ft", true);
 
 			for (auto i = groupId; i < Groups.size(); i++)
-				Groups[i]->GetBitmap(0)->ScaleIndexed(0.84f, 0.84f);
+				Groups[i]->GetBitmap(0)->ScaleIndexed(FallbackMsgFontScaleX, FallbackMsgFontScaleY);
 		}
 
 		delete[] rcData;
@@ -483,14 +530,40 @@ void DatFile::Finalize()
 	}
 }
 
-void DatFile::AddMsgFont(MsgFont* font, const std::string& fontName, const bool changePaletteIndices)
+void DatFile::AddMsgFont(MsgFont* font, uint32_t fontDataSize, const std::string& fontName, const bool changePaletteIndices)
 {
+	const uint8_t* begin = reinterpret_cast<const uint8_t*>(font);
+	const uint8_t* end = begin + fontDataSize;
+	if (font->Height <= 0 || font->Height > 256)
+	{
+		debugf("DatFile::AddMsgFont: invalid font height=%d, aborting font import\n", font->Height);
+		return;
+	}
+
 	auto groupId = Groups.back()->GroupId + 1;
 	auto ptrToData = reinterpret_cast<char*>(font->Data);
 	for (auto charInd = 32; charInd < 128; charInd++, groupId++)
 	{
 		auto curChar = reinterpret_cast<MsgFontChar*>(ptrToData);
-		assertm(curChar->Width == font->CharWidths[charInd], "Score: mismatched font width");
+		if (reinterpret_cast<const uint8_t*>(curChar) + 1 > end)
+		{
+			debugf("DatFile::AddMsgFont: font data overrun at char %d (header)\n", charInd);
+			return;
+		}
+
+		if (curChar->Width != font->CharWidths[charInd])
+		{
+			debugf("DatFile::AddMsgFont: width mismatch at char %d: data=%u table=%u (continuing)\n",
+				charInd, curChar->Width, font->CharWidths[charInd]);
+			font->CharWidths[charInd] = curChar->Width;
+		}
+
+		const int glyphBytes = curChar->Width * font->Height;
+		if (glyphBytes < 0 || reinterpret_cast<const uint8_t*>(curChar->Data) + glyphBytes > end)
+		{
+			debugf("DatFile::AddMsgFont: font data overrun at char %d (glyphBytes=%d)\n", charInd, glyphBytes);
+			return;
+		}
 
 		if (changePaletteIndices)
 		{
@@ -504,7 +577,7 @@ void DatFile::AddMsgFont(MsgFont* font, const std::string& fontName, const bool 
 			}
 		}
 
-		ptrToData += curChar->Width * font->Height + 1;
+		ptrToData += glyphBytes + 1;
 
 		auto bmp = new gdrv_bitmap8(curChar->Width, font->Height, true);
 		auto srcPtr = curChar->Data;
@@ -538,4 +611,6 @@ void DatFile::AddMsgFont(MsgFont* font, const std::string& fontName, const bool 
 
 		Groups.push_back(group);
 	}
+
+	debugf("DatFile::AddMsgFont: imported font '%s' successfully\n", fontName.c_str());
 }

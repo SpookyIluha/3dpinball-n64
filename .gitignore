@@ -259,6 +259,13 @@ paket-files/
 # CodeRush
 .cr/
 
+# N64 build artifacts
+build/
+filesystem/
+*.z64
+*.eeprom
+*.pak
+
 # Python Tools for Visual Studio (PTVS)
 __pycache__/
 *.pyc

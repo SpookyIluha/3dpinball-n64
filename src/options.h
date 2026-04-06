@@ -64,9 +64,9 @@ struct ControlRef
 class options
 {
 public:
-	// Original does ~120 updates per second.
-	static constexpr int MaxUps = 360, MaxFps = MaxUps, MinUps = 60, MinFps = MinUps,
-	                     DefUps = 120, DefFps = 60;
+	// N64 port uses a fixed 60 Hz update/render cadence in v1.
+	static constexpr int MaxUps = 60, MaxFps = 60, MinUps = 60, MinFps = 60,
+	                     DefUps = 60, DefFps = 60;
 	// Original uses 8 sound channels
 	static constexpr int MaxSoundChannels = 32, MinSoundChannels = 1, DefSoundChannels = 8;
 	static optionsStruct Options;

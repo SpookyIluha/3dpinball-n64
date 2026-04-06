@@ -7,6 +7,9 @@
 
 int main(int argc, char* argv[])
 {
+	debug_init_isviewer();
+	debug_init_usblog();
+
 	std::string cmdLine;
 	for (int i = 1; i < argc; i++)
 		cmdLine += argv[i];

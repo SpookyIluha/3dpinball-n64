@@ -30,7 +30,7 @@
 #include <thread>
 #include <map>
 
-#include <kos.h>
+#include <libdragon.h>
 
 typedef char* LPSTR;
 typedef const char* LPCSTR;

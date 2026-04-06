@@ -1,57 +1,75 @@
-#
-# Basic KallistiOS skeleton / test program
-# Copyright (C) 2001-2004 Megan Potter
-# Copyright (C) 2024 Falco Girgis
-#   
+TARGET = 3dpinball-n64
+BUILD_DIR = build
+FS_DIR = filesystem
+ASSETS_DIR = assets
 
-# Put the filename of the output binary here
-TARGET = 3dpinball-dc.elf
+include $(N64_INST)/include/n64.mk
 
-# List all of your C or C++ files here, but change the extension to ".o"
-SOURCE_DIRS  := src
-CPP_FILES    := $(foreach dir,$(SOURCE_DIRS),$(wildcard $(dir)/*.cpp))
-C_FILES      := $(foreach dir,$(SOURCE_DIRS),$(wildcard $(dir)/*.c))
-OBJS         := $(C_FILES:%.c=%.o) $(CPP_FILES:%.cpp=%.o)
+CPP_SRCS := $(wildcard src/*.cpp)
+C_SRCS := $(wildcard src/*.c)
+OBJS := $(CPP_SRCS:%.cpp=$(BUILD_DIR)/%.o) $(C_SRCS:%.c=$(BUILD_DIR)/%.o)
 
-CXXFLAGS     := -IlibADXplay/LibADX
-LIBS         := -lADX
+N64_CFLAGS += -Isrc -DBIG_ENDIAN=1
+N64_CXXFLAGS += -Isrc -DBIG_ENDIAN=1
 
-# Optional path to a directory of resources to bundle within your ELF binary.
-# Its contents are accessible via the "/rd/" virtual directory at runtime.
-KOS_ROMDISK_DIR = romdisk
-OBJS           += romdisk.o
+PINBALL_XM := $(firstword $(wildcard $(ASSETS_DIR)/PINBALL.xm $(ASSETS_DIR)/PINBALL.XM))
+ifeq ($(wildcard $(ASSETS_DIR)/PINBALL.DAT),)
+$(error Missing required asset: $(ASSETS_DIR)/PINBALL.DAT)
+endif
+ifeq ($(PINBALL_XM),)
+$(error Missing required asset: $(ASSETS_DIR)/PINBALL.xm (or PINBALL.XM))
+endif
 
-# Main rule which forces our ELF binary to be built
-all: rm-elf $(TARGET)
+assets_xm_lower := $(wildcard $(ASSETS_DIR)/*.xm)
+assets_xm_upper := $(wildcard $(ASSETS_DIR)/*.XM)
+assets_wav_lower := $(wildcard $(ASSETS_DIR)/*.wav)
+assets_wav_upper := $(wildcard $(ASSETS_DIR)/*.WAV)
+assets_audio := $(assets_xm_lower) $(assets_xm_upper) $(assets_wav_lower) $(assets_wav_upper)
+assets_other := $(filter-out $(assets_audio),$(wildcard $(ASSETS_DIR)/*))
 
-# Include the common KOS Makefile rules and configuration
-include $(KOS_BASE)/Makefile.rules
+assets_conv := $(addprefix $(FS_DIR)/,$(notdir $(assets_xm_lower:%.xm=%.xm64))) \
+               $(addprefix $(FS_DIR)/,$(notdir $(assets_xm_upper:%.XM=%.xm64))) \
+               $(addprefix $(FS_DIR)/,$(notdir $(assets_wav_lower:%.wav=%.wav64))) \
+               $(addprefix $(FS_DIR)/,$(notdir $(assets_wav_upper:%.WAV=%.wav64)))
+assets_copy := $(addprefix $(FS_DIR)/,$(notdir $(assets_other)))
 
-# Cleans the binary ELF file plus the intermediate .o files
-clean: rm-elf
-	-rm -f $(OBJS)
+all: $(TARGET).z64
 
-# Removes the binary ELF file
-rm-elf:
-	-rm -f $(TARGET)
+$(FS_DIR)/%.xm64: $(ASSETS_DIR)/%.xm
+	@mkdir -p $(dir $@)
+	@echo "    [AUDIO] $@"
+	@$(N64_AUDIOCONV) --xm-compress 0 -o $(FS_DIR) "$<"
 
-# Invokes the compiler to build the target from our object files
-$(TARGET): $(OBJS)
-	kos-c++ -o $(TARGET) $(OBJS) $(LIBS)
+$(FS_DIR)/%.xm64: $(ASSETS_DIR)/%.XM
+	@mkdir -p $(dir $@)
+	@echo "    [AUDIO] $@"
+	@$(N64_AUDIOCONV) --xm-compress 0 -o $(FS_DIR) "$<"
 
-# Attempts to run the target using the configured loader application
-run: $(TARGET)
-	$(KOS_LOADER) $(TARGET)
+$(FS_DIR)/%.wav64: $(ASSETS_DIR)/%.wav
+	@mkdir -p $(dir $@)
+	@echo "    [AUDIO] $@"
+	@$(N64_AUDIOCONV) --wav-compress 0 -o $(FS_DIR) "$<"
 
-# Creates a distributable/release ELF which strips away its debug symbols
-dist: $(TARGET)
-	$(KOS_STRIP) $(TARGET)
+$(FS_DIR)/%.wav64: $(ASSETS_DIR)/%.WAV
+	@mkdir -p $(dir $@)
+	@echo "    [AUDIO] $@"
+	@$(N64_AUDIOCONV) --wav-compress 0 -o $(FS_DIR) "$<"
 
-cdi: $(TARGET) cd_root
-	elf2bin $(TARGET)
-	scramble $(basename $(TARGET)).bin cd_root/1ST_READ.BIN
-	makeip -l logo.png -g "3D PINBALL" -f IP.BIN
-	makedisc $(basename $(TARGET)).cdi cd_root IP.BIN
+$(FS_DIR)/%: $(ASSETS_DIR)/%
+	@mkdir -p $(dir $@)
+	@echo "    [COPY ] $@"
+	@cp "$<" "$@"
 
-cd_root:
-	mkdir cd_root
+$(BUILD_DIR)/$(TARGET).dfs: $(assets_conv) $(assets_copy)
+$(BUILD_DIR)/$(TARGET).elf: $(OBJS)
+
+$(TARGET).z64: N64_ROM_TITLE="3D Pinball Space Cadet"
+$(TARGET).z64: N64_ROM_SAVETYPE=eeprom4k
+$(TARGET).z64: $(BUILD_DIR)/$(TARGET).dfs
+
+clean:
+	rm -rf $(BUILD_DIR) $(FS_DIR) $(TARGET).z64
+
+-include $(wildcard $(BUILD_DIR)/*.d)
+
+.PHONY: all clean

@@ -11,6 +11,54 @@ short partman::_field_size[] =
 	2, -1, 2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 0
 };
 
+uint16_t partman::ReadLe16(uint16_t value)
+{
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+	return static_cast<uint16_t>((value >> 8) | (value << 8));
+#else
+	return value;
+#endif
+}
+
+uint32_t partman::ReadLe32(uint32_t value)
+{
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+	return (value >> 24) |
+		((value << 8) & 0x00FF0000) |
+		((value >> 8) & 0x0000FF00) |
+		(value << 24);
+#else
+	return value;
+#endif
+}
+
+void partman::NormalizeEntryBuffer(FieldTypes entryType, char* buffer, size_t fieldSize)
+{
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+	if (!buffer || fieldSize == 0)
+		return;
+
+	if (entryType == FieldTypes::ShortValue || entryType == FieldTypes::ShortArray)
+	{
+		auto* data = reinterpret_cast<uint16_t*>(buffer);
+		auto count = fieldSize / sizeof(uint16_t);
+		for (size_t i = 0; i < count; i++)
+			data[i] = ReadLe16(data[i]);
+	}
+	else if (entryType == FieldTypes::FloatArray)
+	{
+		auto* data = reinterpret_cast<uint32_t*>(buffer);
+		auto count = fieldSize / sizeof(uint32_t);
+		for (size_t i = 0; i < count; i++)
+			data[i] = ReadLe32(data[i]);
+	}
+#else
+	(void)entryType;
+	(void)buffer;
+	(void)fieldSize;
+#endif
+}
+
 DatFile* partman::load_records(LPCSTR lpFileName, bool fullTiltMode)
 {
 	datFileHeader header{};
@@ -22,6 +70,12 @@ DatFile* partman::load_records(LPCSTR lpFileName, bool fullTiltMode)
 		return nullptr;
 
 	fread(&header, 1, sizeof header, fileHandle);
+	header.FileSize = static_cast<int>(ReadLe32(static_cast<uint32_t>(header.FileSize)));
+	header.NumberOfGroups = ReadLe16(header.NumberOfGroups);
+	header.SizeOfBody = static_cast<int>(ReadLe32(static_cast<uint32_t>(header.SizeOfBody)));
+	header.Unknown = ReadLe16(header.Unknown);
+	debugf("partman: loading '%s', groups=%u size=%d body=%d unknown=%u\n",
+		lpFileName, header.NumberOfGroups, header.FileSize, header.SizeOfBody, header.Unknown);
 
 	if (strcmp("PARTOUT(4.0)RESOURCE", header.FileSignature) != 0)
 	{
@@ -73,6 +127,11 @@ DatFile* partman::load_records(LPCSTR lpFileName, bool fullTiltMode)
 			if (entryType == FieldTypes::Bitmap8bit)
 			{
 				fread(&bmpHeader, 1, sizeof(dat8BitBmpHeader), fileHandle);
+				bmpHeader.Width = static_cast<int16_t>(ReadLe16(static_cast<uint16_t>(bmpHeader.Width)));
+				bmpHeader.Height = static_cast<int16_t>(ReadLe16(static_cast<uint16_t>(bmpHeader.Height)));
+				bmpHeader.XPosition = static_cast<int16_t>(ReadLe16(static_cast<uint16_t>(bmpHeader.XPosition)));
+				bmpHeader.YPosition = static_cast<int16_t>(ReadLe16(static_cast<uint16_t>(bmpHeader.YPosition)));
+				bmpHeader.Size = static_cast<int>(ReadLe32(static_cast<uint32_t>(bmpHeader.Size)));
 
 				assertm(bmpHeader.Size + sizeof(dat8BitBmpHeader) == fieldSize, "partman: Wrong bitmap field size");
 				assertm(bmpHeader.Resolution <= 2, "partman: bitmap resolution out of bounds");
@@ -93,6 +152,12 @@ DatFile* partman::load_records(LPCSTR lpFileName, bool fullTiltMode)
 				}
 
 				fread(&zMapHeader, 1, sizeof(dat16BitBmpHeader), fileHandle);
+				zMapHeader.Width = static_cast<int16_t>(ReadLe16(static_cast<uint16_t>(zMapHeader.Width)));
+				zMapHeader.Height = static_cast<int16_t>(ReadLe16(static_cast<uint16_t>(zMapHeader.Height)));
+				zMapHeader.Stride = static_cast<int16_t>(ReadLe16(static_cast<uint16_t>(zMapHeader.Stride)));
+				zMapHeader.Unknown0 = static_cast<int>(ReadLe32(static_cast<uint32_t>(zMapHeader.Unknown0)));
+				zMapHeader.Unknown1_0 = static_cast<int16_t>(ReadLe16(static_cast<uint16_t>(zMapHeader.Unknown1_0)));
+				zMapHeader.Unknown1_1 = static_cast<int16_t>(ReadLe16(static_cast<uint16_t>(zMapHeader.Unknown1_1)));
 
 				auto length = fieldSize - sizeof(dat16BitBmpHeader);
 
@@ -101,6 +166,11 @@ DatFile* partman::load_records(LPCSTR lpFileName, bool fullTiltMode)
 				if (zMapHeader.Stride * zMapHeader.Height * 2u == length)
 				{
 					fread(zMap->ZPtr1, 1, length, fileHandle);
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+					auto words = static_cast<size_t>(length / sizeof(uint16_t));
+					for (size_t i = 0; i < words; i++)
+						zMap->ZPtr1[i] = ReadLe16(zMap->ZPtr1[i]);
+#endif
 				}
 				else
 				{
@@ -119,6 +189,7 @@ DatFile* partman::load_records(LPCSTR lpFileName, bool fullTiltMode)
 					break;
 				}
 				fread(entryBuffer, 1, fieldSize, fileHandle);
+				NormalizeEntryBuffer(entryType, entryBuffer, fieldSize);
 			}
 
 			groupData->AddEntry(entryData);
@@ -131,8 +202,12 @@ DatFile* partman::load_records(LPCSTR lpFileName, bool fullTiltMode)
 	if (datFile->Groups.size() == header.NumberOfGroups)
 	{
 		datFile->Finalize();
+		debugf("partman: loaded dat successfully, groups=%lu\n",
+			static_cast<unsigned long>(datFile->Groups.size()));
 		return datFile;
 	}
+	debugf("partman: failed to load dat, parsed groups=%lu expected=%u\n",
+		static_cast<unsigned long>(datFile->Groups.size()), header.NumberOfGroups);
 	delete datFile;
 	return nullptr;
 }

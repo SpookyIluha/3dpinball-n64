@@ -1,11 +1,29 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "loader.h"
 #include "GroupData.h"
 #include "pb.h"
 #include "pinball.h"
 #include "Sound.h"
+#include "n64_rumble.h"
 #include "zdrv.h"
 #include "math.h"
+
+namespace
+{
+	std::string ConvertSoundPathToWav64(std::string fileName)
+	{
+		auto extPos = fileName.find_last_of('.');
+		if (extPos == std::string::npos)
+		{
+			fileName += ".wav64";
+		}
+		else
+		{
+			fileName = fileName.substr(0, extPos) + ".wav64";
+		}
+		return fileName;
+	}
+}
 
 errorMsg loader::loader_errors[] =
 {
@@ -136,8 +154,6 @@ int loader::get_sound_id(int groupIndex)
 
 	if (!sound_list[soundIndex].Loaded && !sound_list[soundIndex].WavePtr)
 	{
-		WaveHeader wavHeader{};
-
 		int soundGroupId = sound_list[soundIndex].GroupIndex;
 		sound_list[soundIndex].Duration = 0.0;
 		if (soundGroupId > 0 && !pinball::quickFlag)
@@ -158,19 +174,23 @@ int loader::get_sound_id(int groupIndex)
 					fileName.insert(0, "SOUND");
 				}
 
-				auto filePath = pinball::make_path_name(fileName);
-				auto file = fopen(filePath.c_str(), "rb");
-				if (file)
+				auto wav64Path = pinball::make_path_name(ConvertSoundPathToWav64(fileName));
+				sound_list[soundIndex].WavePtr = Sound::LoadWaveFile(wav64Path);
+				if (sound_list[soundIndex].WavePtr)
 				{
-					fread(&wavHeader, 1, sizeof wavHeader, file);
-					fclose(file);
+					Sound::QuerySoundInfo(
+						sound_list[soundIndex].WavePtr,
+						&sound_list[soundIndex].DurationSamples,
+						&sound_list[soundIndex].SampleRate,
+						&sound_list[soundIndex].Duration);
+					debugf("loader: sound %d '%s' dur=%.3f rate=%d samples=%d\n",
+						soundIndex, wav64Path.c_str(), sound_list[soundIndex].Duration,
+						sound_list[soundIndex].SampleRate, sound_list[soundIndex].DurationSamples);
 				}
-
-				auto sampleCount = wavHeader.data_size / (wavHeader.channels * (wavHeader.bits_per_sample / 8.0));
-				sound_list[soundIndex].Duration = static_cast<float>(sampleCount / wavHeader.sample_rate);
-				sound_list[soundIndex].DurationSamples = wavHeader.data_size;
-				sound_list[soundIndex].SampleRate = wavHeader.sample_rate;
-				sound_list[soundIndex].WavePtr = Sound::LoadWaveFile(filePath);
+				else
+				{
+					debugf("loader: failed loading sound %d '%s'\n", soundIndex, wav64Path.c_str());
+				}
 			}
 		}
 	}
@@ -335,6 +355,7 @@ float loader::play_sound(int soundIndex)
 	if (soundIndex <= 0)
 		return 0.0;
 	Sound::PlaySound(sound_list[soundIndex].WavePtr, pb::time_ticks, sound_list[soundIndex].DurationSamples, sound_list[soundIndex].SampleRate);
+	n64_rumble::PulseFromSound(sound_list[soundIndex].Duration);
 	return sound_list[soundIndex].Duration;
 }
 

@@ -4,6 +4,7 @@
 #include "options.h"
 #include "pinball.h"
 #include "score.h"
+#include "n64_save.h"
 
 int high_score::dlg_enter_name;
 int high_score::dlg_score;
@@ -15,59 +16,15 @@ bool high_score::ShowDialog = false;
 
 int high_score::read(high_score_struct* table)
 {
-	char Buffer[20];
-
-	int checkSum = 0;
 	clear_table(table);
-	for (auto position = 0; position < 5; ++position)
-	{
-		auto tablePtr = &table[position];
-
-		snprintf(Buffer, sizeof Buffer, "%d", position);
-		strcat(Buffer, ".Name");
-		auto name = options::get_string(Buffer, "");
-		strncpy(tablePtr->Name, name.c_str(), sizeof tablePtr->Name);
-
-		snprintf(Buffer, sizeof Buffer, "%d", position);
-		strcat(Buffer, ".Score");
-		tablePtr->Score = options::get_int(Buffer, tablePtr->Score);
-
-		for (int i = static_cast<int>(strlen(tablePtr->Name)); --i >= 0; checkSum += tablePtr->Name[i])
-		{
-		}
-		checkSum += tablePtr->Score;
-	}
-
-	auto verification = options::get_int("Verification", 7);
-	if (checkSum != verification)
-		clear_table(table);
+	n64_save::LoadHighScores(table, 5);
 	return 0;
 }
 
 int high_score::write(high_score_struct* table)
 {
-	char Buffer[20];
-
-	int checkSum = 0;
-	for (auto position = 0; position < 5; ++position)
-	{
-		auto tablePtr = &table[position];
-
-		snprintf(Buffer, sizeof Buffer, "%d", position);
-		strcat(Buffer, ".Name");
-		options::set_string(Buffer, tablePtr->Name);
-
-		snprintf(Buffer, sizeof Buffer, "%d", position);
-		strcat(Buffer, ".Score");
-		options::set_int(Buffer, tablePtr->Score);
-
-		for (int i = static_cast<int>(strlen(tablePtr->Name)); --i >= 0; checkSum += tablePtr->Name[i])
-		{
-		}
-		checkSum += tablePtr->Score;
-	}
-
-	options::set_int("Verification", checkSum);
+	n64_save::SaveHighScores(table, 5);
+	n64_save::PumpWrites();
 	return 0;
 }
 

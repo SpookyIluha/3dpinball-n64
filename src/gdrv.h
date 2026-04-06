@@ -10,7 +10,7 @@ enum class BitmapTypes : uint8_t
 
 struct Rgba
 {
-#ifdef BIG_ENDIAN
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
 	uint8_t Red;
 	uint8_t Green;
 	uint8_t Blue;
