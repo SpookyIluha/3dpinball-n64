@@ -86,7 +86,8 @@ void zdrv::paint(int width, int height, gdrv_bitmap8* dstBmp, int dstBmpXOff, in
 	{
 		for (int x = width; x > 0; --x)
 		{
-			if (*dstPtrZ >= *srcPtrZ)
+			// Transparency is encoded in zmap (0xFFFF), not by palette index.
+			if (*srcPtrZ != 0xFFFF && *dstPtrZ >= *srcPtrZ)
 			{
 				*dstPtr = *srcPtr;
 				*dstPtrZ = *srcPtrZ;
@@ -99,6 +100,53 @@ void zdrv::paint(int width, int height, gdrv_bitmap8* dstBmp, int dstBmpXOff, in
 
 		srcPtr += srcBmp->Stride - width;
 		dstPtr += dstBmp->Stride - width;
+		srcPtrZ += srcZMap->Stride - width;
+		dstPtrZ += dstZMap->Stride - width;
+	}
+}
+
+void zdrv::paint_depth(int width, int height, zmap_header_type* dstZMap, int dstZMapXOff, int dstZMapYOff,
+                       zmap_header_type* srcZMap, int srcZMapXOff, int srcZMapYOff)
+{
+	auto srcPtrZ = &srcZMap->ZPtr1[srcZMap->Stride * srcZMapYOff + srcZMapXOff];
+	auto dstPtrZ = &dstZMap->ZPtr1[dstZMap->Stride * dstZMapYOff + dstZMapXOff];
+
+	for (int y = height; y > 0; y--)
+	{
+		for (int x = width; x > 0; --x)
+		{
+			if (*dstPtrZ >= *srcPtrZ)
+				*dstPtrZ = *srcPtrZ;
+			++srcPtrZ;
+			++dstPtrZ;
+		}
+
+		srcPtrZ += srcZMap->Stride - width;
+		dstPtrZ += dstZMap->Stride - width;
+	}
+}
+
+void zdrv::paint_depth_masked(int width, int height, zmap_header_type* dstZMap, int dstZMapXOff, int dstZMapYOff,
+                              zmap_header_type* srcZMap, int srcZMapXOff, int srcZMapYOff,
+                              gdrv_bitmap8* srcBmp, int srcBmpXOff, int srcBmpYOff)
+{
+	auto srcPtrZ = &srcZMap->ZPtr1[srcZMap->Stride * srcZMapYOff + srcZMapXOff];
+	auto dstPtrZ = &dstZMap->ZPtr1[dstZMap->Stride * dstZMapYOff + dstZMapXOff];
+	(void)srcBmp;
+	(void)srcBmpXOff;
+	(void)srcBmpYOff;
+
+	for (int y = height; y > 0; y--)
+	{
+		for (int x = width; x > 0; --x)
+		{
+			// Use zmap to determine transparency. Palette index 0 can be opaque black.
+			if (*srcPtrZ != 0xFFFF && *dstPtrZ >= *srcPtrZ)
+				*dstPtrZ = *srcPtrZ;
+			++srcPtrZ;
+			++dstPtrZ;
+		}
+
 		srcPtrZ += srcZMap->Stride - width;
 		dstPtrZ += dstZMap->Stride - width;
 	}
@@ -118,9 +166,10 @@ void zdrv::paint_flat(int width, int height, gdrv_bitmap8* dstBmp, int dstBmpXOf
 	{
 		for (int x = width; x > 0; --x)
 		{
-			if ((*srcPtr).Color && *zPtr > depth)
+			if (*srcPtr && *zPtr > depth)
 			{
 				*dstPtr = *srcPtr;
+				*zPtr = depth;
 			}
 			++srcPtr;
 			++dstPtr;

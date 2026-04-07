@@ -4,9 +4,38 @@
 #include "control.h"
 #include "fullscrn.h"
 #include "loader.h"
+#include "maths.h"
 #include "render.h"
 #include "score.h"
 #include "timer.h"
+
+namespace
+{
+	void RestoreBackgroundRegion(int x, int y, int width, int height, gdrv_bitmap8* bgBmp)
+	{
+		gdrv::fill_bitmap(render::vscreen, width, height, x, y, 0);
+		if (!bgBmp)
+			return;
+
+		rectangle_type dstRect{x, y, width, height};
+		rectangle_type bgRect{bgBmp->XPosition, bgBmp->YPosition, bgBmp->Width, bgBmp->Height};
+		rectangle_type overlap{};
+		if (!maths::rectangle_clip(&dstRect, &bgRect, &overlap))
+			return;
+
+		const int srcX = overlap.XPosition - bgBmp->XPosition;
+		const int srcY = overlap.YPosition - bgBmp->YPosition;
+		gdrv::copy_bitmap(
+			render::vscreen,
+			overlap.Width,
+			overlap.Height,
+			overlap.XPosition,
+			overlap.YPosition,
+			bgBmp,
+			srcX,
+			srcY);
+	}
+}
 
 
 TTextBox::TTextBox(TPinballTable* table, int groupIndex) : TPinballComponent(table, groupIndex, true)
@@ -72,19 +101,7 @@ void TTextBox::TimerExpired(int timerId, void* caller)
 
 void TTextBox::Clear()
 {
-	gdrv_bitmap8* bmp = BgBmp;
-	if (bmp)
-		gdrv::copy_bitmap(
-			render::vscreen,
-			Width,
-			Height,
-			OffsetX,
-			OffsetY,
-			bmp,
-			OffsetX,
-			OffsetY);
-	else
-		gdrv::fill_bitmap(render::vscreen, Width, Height, OffsetX, OffsetY, 0);	
+	RestoreBackgroundRegion(OffsetX, OffsetY, Width, Height, BgBmp);
 	render::get_dirty_regions().push_back({OffsetX, OffsetY, Width, Height});
 
 	if (Timer)
@@ -151,19 +168,7 @@ void TTextBox::Display(const char* text, float time)
 
 void TTextBox::Draw()
 {
-	auto bmp = BgBmp;
-	if (bmp)
-		gdrv::copy_bitmap(
-			render::vscreen,
-			Width,
-			Height,
-			OffsetX,
-			OffsetY,
-			bmp,
-			OffsetX,
-			OffsetY);
-	else
-		gdrv::fill_bitmap(render::vscreen, Width, Height, OffsetX, OffsetY, 0);
+	RestoreBackgroundRegion(OffsetX, OffsetY, Width, Height, BgBmp);
 	render::get_dirty_regions().push_back({OffsetX, OffsetY, Width, Height});
 
 	bool display = false;

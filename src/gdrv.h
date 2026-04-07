@@ -49,7 +49,7 @@ struct gdrv_bitmap8
 	gdrv_bitmap8(const struct dat8BitBmpHeader& header);
 	~gdrv_bitmap8();
 	void ScaleIndexed(float scaleX, float scaleY);
-	ColorRgba* BmpBufPtr1;
+	uint8_t* BmpBufPtr1;
 	char* IndexedBmpPtr;
 	int Width;
 	int Height;
@@ -73,6 +73,9 @@ public:
 	                                       gdrv_bitmap8* srcBmp, int srcXOff, int srcYOff);
 	static void grtext_draw_ttext_in_box(LPCSTR text, int xOff, int yOff, int width, int height, int a6);
 	static void ApplyPalette(gdrv_bitmap8& bmp);
+	static uint16_t Palette5551(uint8_t colorIndex);
+	static const uint16_t* Palette5551Table();
 private:
 	static ColorRgba current_palette[256];
+	static uint16_t current_palette_5551[256];
 };

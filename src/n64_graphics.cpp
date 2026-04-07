@@ -6,33 +6,9 @@ namespace
 {
 	surface_t* CurrentSurface = nullptr;
 	uint16_t* SplashRaw = nullptr;
-	surface_t Offscreen = {};
-	bool OffscreenValid = false;
 	bool SplashActive = false;
-
-	inline uint16_t PackRgba5551(const Rgba& c)
-	{
-		// libdragon DEPTH_16_BPP framebuffers are RGBA5551.
-		// Source ColorRgba channel layout in this codebase is effectively BGRA for file-derived data,
-		// so swap R/B at the final pack stage for correct output on N64.
-		const uint16_t a = 1;
-		return static_cast<uint16_t>(
-			((c.Blue >> 3) << 11) |
-			((c.Green >> 3) << 6) |
-			((c.Red >> 3) << 1) |
-			a);
-	}
-
-	void EnsureOffscreen()
-	{
-		if (OffscreenValid || !render::vscreen)
-			return;
-
-		Offscreen = surface_alloc(FMT_RGBA16, render::vscreen->Width, render::vscreen->Height);
-		OffscreenValid = Offscreen.buffer != nullptr;
-		debugf("n64_graphics: offscreen %dx%d allocated=%d\n",
-			render::vscreen->Width, render::vscreen->Height, OffscreenValid ? 1 : 0);
-	}
+	bool RdpPresentedFrame = false;
+	alignas(8) uint16_t VscreenTlut[256]{};
 
 	void LoadSplashRaw()
 	{
@@ -48,71 +24,69 @@ namespace
 		fclose(file);
 	}
 
-	void BlitRegion(int srcX0, int srcY0, int srcW, int srcH)
+	void DrawVscreenWithRdp()
 	{
-		if (!render::vscreen)
-			return;
-		EnsureOffscreen();
-		if (!OffscreenValid)
+		if (!render::vscreen || !CurrentSurface)
 			return;
 
-		int x0 = std::max(0, srcX0);
-		int y0 = std::max(0, srcY0);
-		int x1 = std::min(render::vscreen->Width, srcX0 + srcW);
-		int y1 = std::min(render::vscreen->Height, srcY0 + srcH);
+		const int dstW = static_cast<int>(display_get_width());
+		const int dstH = static_cast<int>(display_get_height());
+		const int baseX = (dstW - render::vscreen->Width) / 2;
+		const int baseY = (dstH - render::vscreen->Height) / 2;
+		const int shakeX = std::clamp(render::get_offset_x(), -12, 12);
+		const int shakeY = std::clamp(render::get_offset_y(), -8, 8);
+		const int drawX = baseX + shakeX;
+		const int drawY = baseY + shakeY;
 
-		for (int y = y0; y < y1; ++y)
-		{
-			auto src = &render::vscreen->BmpBufPtr1[y * render::vscreen->Width + x0];
-			auto dst = reinterpret_cast<uint16_t*>(
-				reinterpret_cast<uint8_t*>(Offscreen.buffer) + y * Offscreen.stride
-			) + x0;
+		const auto* palette = gdrv::Palette5551Table();
+		std::memcpy(VscreenTlut, palette, sizeof(VscreenTlut));
+		data_cache_hit_writeback(VscreenTlut, sizeof(VscreenTlut));
+		data_cache_hit_writeback(render::vscreen->BmpBufPtr1,
+			static_cast<unsigned long>(render::vscreen->Stride * render::vscreen->Height));
 
-			for (int x = x0; x < x1; ++x)
-			{
-				*dst++ = PackRgba5551(src->rgba);
-				++src;
-			}
-		}
+		surface_t ci8Surface = surface_make(
+			render::vscreen->BmpBufPtr1,
+			FMT_CI8,
+			static_cast<uint16_t>(render::vscreen->Width),
+			static_cast<uint16_t>(render::vscreen->Height),
+			static_cast<uint16_t>(render::vscreen->Stride));
+
+		rdpq_attach(CurrentSurface, nullptr);
+		rdpq_set_mode_fill(RGBA32(0, 0, 0, 0));
+		rdpq_fill_rectangle(0, 0, dstW, dstH);
+		rdpq_set_mode_copy(false);
+		rdpq_mode_tlut(TLUT_RGBA16);
+		rdpq_tex_upload_tlut(VscreenTlut, 0, 256);
+		rdpq_tex_blit(&ci8Surface, static_cast<float>(drawX), static_cast<float>(drawY), nullptr);
+		rdpq_detach_show();
+		RdpPresentedFrame = true;
+		CurrentSurface = nullptr;
 	}
 }
 
 void n64_graphics::Initialize()
 {
-	rdpq_init();
 	LoadSplashRaw();
 	CurrentSurface = display_get();
 }
 
+void n64_graphics::ReleaseStartupAssets()
+{
+	delete[] SplashRaw;
+	SplashRaw = nullptr;
+}
+
 void n64_graphics::SwapBuffers()
 {
-	if (!CurrentSurface)
+	if (RdpPresentedFrame)
+	{
+		RdpPresentedFrame = false;
+		CurrentSurface = display_get();
 		return;
-
-	if (OffscreenValid && !SplashActive)
-	{
-		const int dstW = static_cast<int>(display_get_width());
-		const int dstH = static_cast<int>(display_get_height());
-		const int baseX = (dstW - Offscreen.width) / 2;
-		const int baseY = (dstH - Offscreen.height) / 2;
-
-		// Nudge code updates render offsets. Apply them at presentation so the table visibly "shakes".
-		const int shakeX = std::clamp(render::get_offset_x(), -12, 12);
-		const int shakeY = std::clamp(render::get_offset_y(), -8, 8);
-
-		rdpq_attach(CurrentSurface, nullptr);
-		rdpq_set_mode_copy(false);
-		rdpq_tex_blit(
-			&Offscreen,
-			static_cast<float>(baseX + shakeX),
-			static_cast<float>(baseY + shakeY),
-			nullptr);
-		rdpq_detach_show();
 	}
-	else
-	{
+
+	if (CurrentSurface)
 		display_show(CurrentSurface);
-	}
 
 	CurrentSurface = display_get();
 }
@@ -122,6 +96,7 @@ void n64_graphics::ShowSplash(std::string text)
 	if (!CurrentSurface)
 		return;
 	SplashActive = true;
+	LoadSplashRaw();
 
 	graphics_fill_screen(CurrentSurface, graphics_make_color(0, 0, 0, 255));
 	graphics_set_color(graphics_make_color(255, 255, 255, 255), 0);
@@ -173,15 +148,14 @@ void n64_graphics::ShowSplash(std::string text)
 void n64_graphics::UpdateFull()
 {
 	SplashActive = false;
-	BlitRegion(0, 0, render::vscreen->Width, render::vscreen->Height);
+	DrawVscreenWithRdp();
 }
 
 void n64_graphics::Update()
 {
 	SplashActive = false;
-	for (const auto& dirty : render::get_dirty_regions())
-	{
-		BlitRegion(dirty.XPosition, dirty.YPosition, dirty.Width, dirty.Height);
-	}
+	if (!CurrentSurface || !render::vscreen)
+		return;
+	DrawVscreenWithRdp();
 	render::get_dirty_regions().clear();
 }

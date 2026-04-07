@@ -50,6 +50,7 @@ public:
 	static int get_offset_x();
 	static int get_offset_y();
 	static void build_occlude_list();
+	static void invalidate_all();
 
 	static std::vector<rectangle_type>& get_dirty_regions() {return dirty_regions;}
 private:
@@ -60,10 +61,12 @@ private:
 	static int zmap_offset, zmap_offsetY, offset_x, offset_y;
 	static float zscaler, zmin, zmax;
 	static rectangle_type vscreen_rect;
-	static gdrv_bitmap8 *ball_bitmap[20];
-	static zmap_header_type* zscreen;
+	static bool full_redraw_pending;
 
-	static void repaint(struct render_sprite_type_struct* sprite);
+	static void repaint(const rectangle_type& rect, const std::vector<render_sprite_type_struct*>& sprites);
+	static void build_z_for_region(const rectangle_type& rect, const std::vector<render_sprite_type_struct*>& sprites,
+	                               zmap_header_type* zMap);
+	static void collect_sprites_for_rect(const rectangle_type& rect, std::vector<render_sprite_type_struct*>& outSprites);
 	static void paint_balls();
 	static void unpaint_balls();
 };

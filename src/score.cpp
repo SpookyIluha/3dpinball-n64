@@ -4,8 +4,37 @@
 #include "fullscrn.h"
 #include "loader.h"
 #include "GroupData.h"
+#include "maths.h"
 #include "pb.h"
 #include "render.h"
+
+namespace
+{
+	void RestoreBackgroundRegion(int x, int y, int width, int height, gdrv_bitmap8* bgBmp)
+	{
+		gdrv::fill_bitmap(render::vscreen, width, height, x, y, 0);
+		if (!bgBmp)
+			return;
+
+		rectangle_type dstRect{x, y, width, height};
+		rectangle_type bgRect{bgBmp->XPosition, bgBmp->YPosition, bgBmp->Width, bgBmp->Height};
+		rectangle_type overlap{};
+		if (!maths::rectangle_clip(&dstRect, &bgRect, &overlap))
+			return;
+
+		const int srcX = overlap.XPosition - bgBmp->XPosition;
+		const int srcY = overlap.YPosition - bgBmp->YPosition;
+		gdrv::copy_bitmap(
+			render::vscreen,
+			overlap.Width,
+			overlap.Height,
+			overlap.XPosition,
+			overlap.YPosition,
+			bgBmp,
+			srcX,
+			srcY);
+	}
+}
 
 
 score_msg_font_type* score::msg_fontp;
@@ -94,18 +123,7 @@ void score::erase(scoreStruct* score, int blitFlag)
 {
 	if (score)
 	{
-		if (score->BackgroundBmp)
-			gdrv::copy_bitmap(
-				render::vscreen,
-				score->Width,
-				score->Height,
-				score->OffsetX,
-				score->OffsetY,
-				score->BackgroundBmp,
-				score->OffsetX,
-				score->OffsetY);
-		else
-			gdrv::fill_bitmap(render::vscreen, score->Width, score->Height, score->OffsetX, score->OffsetY, 0);
+		RestoreBackgroundRegion(score->OffsetX, score->OffsetY, score->Width, score->Height, score->BackgroundBmp);
 		render::get_dirty_regions().push_back({score->OffsetX, score->OffsetY, score->Width, score->Height});
 	}
 }

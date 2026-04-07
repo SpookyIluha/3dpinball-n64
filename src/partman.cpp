@@ -74,8 +74,6 @@ DatFile* partman::load_records(LPCSTR lpFileName, bool fullTiltMode)
 	header.NumberOfGroups = ReadLe16(header.NumberOfGroups);
 	header.SizeOfBody = static_cast<int>(ReadLe32(static_cast<uint32_t>(header.SizeOfBody)));
 	header.Unknown = ReadLe16(header.Unknown);
-	debugf("partman: loading '%s', groups=%u size=%d body=%d unknown=%u\n",
-		lpFileName, header.NumberOfGroups, header.FileSize, header.SizeOfBody, header.Unknown);
 
 	if (strcmp("PARTOUT(4.0)RESOURCE", header.FileSignature) != 0)
 	{
@@ -202,12 +200,8 @@ DatFile* partman::load_records(LPCSTR lpFileName, bool fullTiltMode)
 	if (datFile->Groups.size() == header.NumberOfGroups)
 	{
 		datFile->Finalize();
-		debugf("partman: loaded dat successfully, groups=%lu\n",
-			static_cast<unsigned long>(datFile->Groups.size()));
 		return datFile;
 	}
-	debugf("partman: failed to load dat, parsed groups=%lu expected=%u\n",
-		static_cast<unsigned long>(datFile->Groups.size()), header.NumberOfGroups);
 	delete datFile;
 	return nullptr;
 }

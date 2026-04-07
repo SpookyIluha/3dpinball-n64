@@ -487,8 +487,6 @@ void DatFile::Finalize()
 		if (rcData != nullptr)
 		{
 			NormalizeMsgFontHeader(rcData);
-			debugf("DatFile::Finalize: using pinball.exe font, size=%lu height=%d gap=%d\n",
-				static_cast<unsigned long>(rcSize), rcData->Height, rcData->GapWidth);
 			AddMsgFont(rcData, rcSize, "pbmsg_ft", false);
 		}
 		else
@@ -511,8 +509,6 @@ void DatFile::Finalize()
 			fread(rcData, 1, fileSize, fileHandle);
 			fclose(fileHandle);
 			NormalizeMsgFontHeader(rcData);
-			debugf("DatFile::Finalize: using PINBALL2.MID font, size=%lu height=%d gap=%d\n",
-				static_cast<unsigned long>(fileSize), rcData->Height, rcData->GapWidth);
 
 			auto groupId = Groups.back()->GroupId + 1u;
 			AddMsgFont(rcData, fileSize, "pbmsg_ft", true);
@@ -536,7 +532,6 @@ void DatFile::AddMsgFont(MsgFont* font, uint32_t fontDataSize, const std::string
 	const uint8_t* end = begin + fontDataSize;
 	if (font->Height <= 0 || font->Height > 256)
 	{
-		debugf("DatFile::AddMsgFont: invalid font height=%d, aborting font import\n", font->Height);
 		return;
 	}
 
@@ -547,21 +542,17 @@ void DatFile::AddMsgFont(MsgFont* font, uint32_t fontDataSize, const std::string
 		auto curChar = reinterpret_cast<MsgFontChar*>(ptrToData);
 		if (reinterpret_cast<const uint8_t*>(curChar) + 1 > end)
 		{
-			debugf("DatFile::AddMsgFont: font data overrun at char %d (header)\n", charInd);
 			return;
 		}
 
 		if (curChar->Width != font->CharWidths[charInd])
 		{
-			debugf("DatFile::AddMsgFont: width mismatch at char %d: data=%u table=%u (continuing)\n",
-				charInd, curChar->Width, font->CharWidths[charInd]);
 			font->CharWidths[charInd] = curChar->Width;
 		}
 
 		const int glyphBytes = curChar->Width * font->Height;
 		if (glyphBytes < 0 || reinterpret_cast<const uint8_t*>(curChar->Data) + glyphBytes > end)
 		{
-			debugf("DatFile::AddMsgFont: font data overrun at char %d (glyphBytes=%d)\n", charInd, glyphBytes);
 			return;
 		}
 
@@ -611,6 +602,4 @@ void DatFile::AddMsgFont(MsgFont* font, uint32_t fontDataSize, const std::string
 
 		Groups.push_back(group);
 	}
-
-	debugf("DatFile::AddMsgFont: imported font '%s' successfully\n", fontName.c_str());
 }

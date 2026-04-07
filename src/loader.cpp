@@ -183,13 +183,6 @@ int loader::get_sound_id(int groupIndex)
 						&sound_list[soundIndex].DurationSamples,
 						&sound_list[soundIndex].SampleRate,
 						&sound_list[soundIndex].Duration);
-					debugf("loader: sound %d '%s' dur=%.3f rate=%d samples=%d\n",
-						soundIndex, wav64Path.c_str(), sound_list[soundIndex].Duration,
-						sound_list[soundIndex].SampleRate, sound_list[soundIndex].DurationSamples);
-				}
-				else
-				{
-					debugf("loader: failed loading sound %d '%s'\n", soundIndex, wav64Path.c_str());
 				}
 			}
 		}

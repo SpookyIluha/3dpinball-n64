@@ -14,29 +14,27 @@ zmap_header_type* render::background_zmap;
 int render::zmap_offset, render::zmap_offsetY, render::offset_x, render::offset_y;
 float render::zscaler, render::zmin, render::zmax;
 rectangle_type render::vscreen_rect;
-gdrv_bitmap8 *render::vscreen, *render::background_bitmap, *render::ball_bitmap[20];
-zmap_header_type* render::zscreen;
+gdrv_bitmap8 *render::vscreen, *render::background_bitmap;
+bool render::full_redraw_pending = false;
 
 void render::init(gdrv_bitmap8* bmp, float zMin, float zScaler, int width, int height)
 {
 	zscaler = zScaler;
 	zmin = zMin;
 	zmax = 4294967300.0f / zScaler + zMin;
+	offset_x = 0;
+	offset_y = 0;
+
 	vscreen = new gdrv_bitmap8(width, height, false);
-	zscreen = new zmap_header_type(width, height, width);
-	zdrv::fill(zscreen, zscreen->Width, zscreen->Height, 0, 0, 0xFFFF);
 	vscreen_rect.YPosition = 0;
 	vscreen_rect.XPosition = 0;
 	vscreen_rect.Width = width;
 	vscreen_rect.Height = height;
 	vscreen->YPosition = 0;
 	vscreen->XPosition = 0;
-	for (auto& ballBmp : ball_bitmap)
-	{
-		ballBmp = new gdrv_bitmap8(64, 64, false);
-	}
 
 	background_bitmap = bmp;
+	full_redraw_pending = true;
 	if (bmp)
 		gdrv::copy_bitmap(vscreen, width, height, 0, 0, bmp, 0, 0);
 	else
@@ -46,26 +44,69 @@ void render::init(gdrv_bitmap8* bmp, float zMin, float zScaler, int width, int h
 void render::uninit()
 {
 	delete vscreen;
-	delete zscreen;
 	for (auto sprite : sprite_list)
 		remove_sprite(sprite, false);
 	for (auto ball : ball_list)
 		remove_ball(ball, false);
-	for (auto& ballBmp : ball_bitmap)
-		delete ballBmp;
 	ball_list.clear();
 	dirty_list.clear();
 	sprite_list.clear();
+	dirty_regions.clear();
 }
 
 void render::update()
 {
-	unpaint_balls();
+	// The RDP samples render::vscreen during present; wait for prior frame to finish
+	// before CPU updates dirty regions in-place.
+	rspq_wait();
 
-	// Clip dirty sprites with vScreen, clear clipping (dirty) rectangles 
+	std::vector<rectangle_type> repaintQueue;
+	repaintQueue.reserve(dirty_list.size() * 2 + ball_list.size() * 2);
+
+	auto enqueue_repaint = [&](const rectangle_type& inputRect)
+	{
+		auto rect = inputRect;
+		if (rect.Width <= 0 || rect.Height <= 0)
+			return;
+
+		// Inflate by 1px to avoid tiny cracks when moving sprites/balls update edges.
+		rect.XPosition -= 1;
+		rect.YPosition -= 1;
+		rect.Width += 2;
+		rect.Height += 2;
+
+		if (maths::rectangle_clip(&rect, &vscreen_rect, &rect) && rect.Width > 0 && rect.Height > 0)
+			repaintQueue.push_back(rect);
+	};
+	if (full_redraw_pending)
+	{
+		full_redraw_pending = false;
+
+		// Avoid a single huge z-region allocation on 4MB systems by repainting in tiles.
+		constexpr int TileW = 96;
+		constexpr int TileH = 64;
+		std::vector<render_sprite_type_struct*> tileSprites;
+		for (int y = 0; y < vscreen_rect.Height; y += TileH)
+		{
+			for (int x = 0; x < vscreen_rect.Width; x += TileW)
+			{
+				rectangle_type tile{};
+				tile.XPosition = x;
+				tile.YPosition = y;
+				tile.Width = std::min(TileW, vscreen_rect.Width - x);
+				tile.Height = std::min(TileH, vscreen_rect.Height - y);
+
+				collect_sprites_for_rect(tile, tileSprites);
+				repaint(tile, tileSprites);
+				dirty_regions.push_back(tile);
+			}
+		}
+	}
+
+	// Clip dirty sprites with vScreen, collect clipping rectangles.
 	for (auto curSprite : dirty_list)
 	{
-		bool clearSprite = false;
+		bool collectRect = false;
 		switch (curSprite->VisualType)
 		{
 		case VisualTypes::Sprite:
@@ -73,59 +114,64 @@ void render::update()
 				maths::enclosing_box(&curSprite->DirtyRectPrev, &curSprite->BmpRect, &curSprite->DirtyRect);
 
 			if (maths::rectangle_clip(&curSprite->DirtyRect, &vscreen_rect, &curSprite->DirtyRect))
-				clearSprite = true;
+				collectRect = true;
 			else
 				curSprite->DirtyRect.Width = -1;
 			break;
 		case VisualTypes::None:
 			if (maths::rectangle_clip(&curSprite->BmpRect, &vscreen_rect, &curSprite->DirtyRect))
-				clearSprite = !curSprite->Bmp;
+				collectRect = !curSprite->Bmp;
 			else
 				curSprite->DirtyRect.Width = -1;
 			break;
 		default: break;
 		}
 
-		if (clearSprite)
+		if (collectRect && curSprite->DirtyRect.Width > 0 && curSprite->DirtyRect.Height > 0)
 		{
-			auto yPos = curSprite->DirtyRect.YPosition;
-			auto width = curSprite->DirtyRect.Width;
-			auto xPos = curSprite->DirtyRect.XPosition;
-			auto height = curSprite->DirtyRect.Height;
-			zdrv::fill(zscreen, width, height, xPos, yPos, 0xFFFF);
-			if (background_bitmap)
-				gdrv::copy_bitmap(vscreen, width, height, xPos, yPos, background_bitmap, xPos, yPos);
-			else
-				gdrv::fill_bitmap(vscreen, width, height, xPos, yPos, 0);
-
-			dirty_regions.push_back({
-				xPos,
-				yPos,
-				width,
-				height
-			});
+			enqueue_repaint(curSprite->DirtyRect);
 		}
 	}
 
-	// Paint dirty rectangles of dirty sprites
-	for (auto sprite : dirty_list)
+	// Balls are always dynamic: repaint previous and current locations.
+	for (auto ball : ball_list)
 	{
-		if (sprite->DirtyRect.Width > 0 && (sprite->VisualType == VisualTypes::None || sprite->VisualType ==
-			VisualTypes::Sprite))
-			repaint(sprite);
+		rectangle_type clipped{};
+		if (ball->DirtyRectPrev.Width > 0 && maths::rectangle_clip(&ball->DirtyRectPrev, &vscreen_rect, &clipped))
+			enqueue_repaint(clipped);
+
+		if (ball->Bmp && maths::rectangle_clip(&ball->BmpRect, &vscreen_rect, &ball->DirtyRect))
+			enqueue_repaint(ball->DirtyRect);
+		else
+			ball->DirtyRect.Width = -1;
+	}
+
+	std::vector<render_sprite_type_struct*> regionSprites;
+	for (const auto& rect : repaintQueue)
+	{
+		if (rect.Width <= 0 || rect.Height <= 0)
+			continue;
+
+		collect_sprites_for_rect(rect, regionSprites);
+		repaint(rect, regionSprites);
+		dirty_regions.push_back(rect);
 	}
 
 	paint_balls();
 
-	// In the original, this used to blit dirty sprites and balls
+	// In the original, this used to blit dirty sprites and balls.
 	for (auto sprite : dirty_list)
 	{
 		sprite->DirtyRectPrev = sprite->DirtyRect;
 		if (sprite->UnknownFlag != 0)
 			remove_sprite(sprite, true);
 	}
-
 	dirty_list.clear();
+
+	for (auto ball : ball_list)
+	{
+		ball->DirtyRectPrev = ball->DirtyRect;
+	}
 }
 
 void render::sprite_modified(render_sprite_type_struct* sprite)
@@ -189,7 +235,6 @@ render_sprite_type_struct* render::create_sprite(VisualTypes visualType, gdrv_bi
 	}
 	return sprite;
 }
-
 
 void render::remove_sprite(render_sprite_type_struct* sprite, bool removeFromList)
 {
@@ -283,35 +328,104 @@ void render::ball_set(render_sprite_type_struct* sprite, gdrv_bitmap8* bmp, floa
 	}
 }
 
-void render::repaint(struct render_sprite_type_struct* sprite)
+void render::collect_sprites_for_rect(const rectangle_type& rect, std::vector<render_sprite_type_struct*>& outSprites)
 {
-	rectangle_type clipRect{};
-	if (!sprite->SpriteArray)
-		return;
-	for (auto refSprite : *sprite->SpriteArray)
+	outSprites.clear();
+	auto region = rect;
+	for (auto sprite : sprite_list)
 	{
-		if (!refSprite->UnknownFlag && refSprite->Bmp)
-		{
-			if (maths::rectangle_clip(&refSprite->BmpRect, &sprite->DirtyRect, &clipRect))
-				zdrv::paint(
-					clipRect.Width,
-					clipRect.Height,
-					vscreen,
-					clipRect.XPosition,
-					clipRect.YPosition,
-					zscreen,
-					clipRect.XPosition,
-					clipRect.YPosition,
-					refSprite->Bmp,
-					clipRect.XPosition - refSprite->BmpRect.XPosition,
-					clipRect.YPosition - refSprite->BmpRect.YPosition,
-					refSprite->ZMap,
-					clipRect.XPosition + refSprite->ZMapOffestY - refSprite->BmpRect.XPosition,
-					clipRect.YPosition + refSprite->ZMapOffestX - refSprite->BmpRect.YPosition);
-		}
+		if (sprite->UnknownFlag || !sprite->Bmp)
+			continue;
+
+		if (maths::rectangle_clip(&sprite->BmpRect, &region, nullptr))
+			outSprites.push_back(sprite);
 	}
 }
 
+void render::repaint(const rectangle_type& rect, const std::vector<render_sprite_type_struct*>& sprites)
+{
+	if (rect.Width <= 0 || rect.Height <= 0)
+		return;
+
+	// Restore from static table background. Handle background bitmaps with non-zero placement.
+	gdrv::fill_bitmap(vscreen, rect.Width, rect.Height, rect.XPosition, rect.YPosition, 0);
+	if (background_bitmap)
+	{
+		auto region = rect;
+		rectangle_type bgRect
+		{
+			background_bitmap->XPosition,
+			background_bitmap->YPosition,
+			background_bitmap->Width,
+			background_bitmap->Height
+		};
+		rectangle_type overlap{};
+		if (maths::rectangle_clip(&region, &bgRect, &overlap))
+		{
+			const int srcX = overlap.XPosition - background_bitmap->XPosition;
+			const int srcY = overlap.YPosition - background_bitmap->YPosition;
+			gdrv::copy_bitmap(vscreen, overlap.Width, overlap.Height,
+			                  overlap.XPosition, overlap.YPosition,
+			                  background_bitmap, srcX, srcY);
+		}
+	}
+
+	auto regionZ = new zmap_header_type(rect.Width, rect.Height, rect.Width);
+	zdrv::fill(regionZ, rect.Width, rect.Height, 0, 0, 0xFFFF);
+	auto region = rect;
+
+	rectangle_type clipRect{};
+	for (auto refSprite : sprites)
+	{
+		if (maths::rectangle_clip(&refSprite->BmpRect, &region, &clipRect))
+		{
+			zdrv::paint(
+				clipRect.Width,
+				clipRect.Height,
+				vscreen,
+				clipRect.XPosition,
+				clipRect.YPosition,
+				regionZ,
+				clipRect.XPosition - rect.XPosition,
+				clipRect.YPosition - rect.YPosition,
+				refSprite->Bmp,
+				clipRect.XPosition - refSprite->BmpRect.XPosition,
+				clipRect.YPosition - refSprite->BmpRect.YPosition,
+				refSprite->ZMap,
+				clipRect.XPosition + refSprite->ZMapOffestY - refSprite->BmpRect.XPosition,
+				clipRect.YPosition + refSprite->ZMapOffestX - refSprite->BmpRect.YPosition);
+		}
+	}
+
+	delete regionZ;
+}
+
+void render::build_z_for_region(const rectangle_type& rect, const std::vector<render_sprite_type_struct*>& sprites,
+                                zmap_header_type* zMap)
+{
+	zdrv::fill(zMap, rect.Width, rect.Height, 0, 0, 0xFFFF);
+	auto region = rect;
+
+	rectangle_type clipRect{};
+	for (auto refSprite : sprites)
+	{
+		if (maths::rectangle_clip(&refSprite->BmpRect, &region, &clipRect))
+		{
+			zdrv::paint_depth_masked(
+				clipRect.Width,
+				clipRect.Height,
+				zMap,
+				clipRect.XPosition - rect.XPosition,
+				clipRect.YPosition - rect.YPosition,
+				refSprite->ZMap,
+				clipRect.XPosition + refSprite->ZMapOffestY - refSprite->BmpRect.XPosition,
+				clipRect.YPosition + refSprite->ZMapOffestX - refSprite->BmpRect.YPosition,
+				refSprite->Bmp,
+				clipRect.XPosition - refSprite->BmpRect.XPosition,
+				clipRect.YPosition - refSprite->BmpRect.YPosition);
+		}
+	}
+}
 
 void render::paint_balls()
 {
@@ -330,78 +444,54 @@ void render::paint_balls()
 		}
 	}
 
-	// For balls that clip vScreen: save original vScreen contents and paint ball bitmap.
-	for (auto index = 0u; index < ball_list.size(); ++index)
+	rectangle_type ballsUnion{};
+	ballsUnion.Width = -1;
+	for (auto ball : ball_list)
 	{
-		auto ball = ball_list[index];
-		auto dirty = &ball->DirtyRect;
-		if (ball->Bmp && maths::rectangle_clip(&ball->BmpRect, &vscreen_rect, &ball->DirtyRect))
+		if (ball->DirtyRect.Width > 0)
 		{
-			int xPos = dirty->XPosition;
-			int yPos = dirty->YPosition;
-			gdrv::copy_bitmap(ball_bitmap[index], dirty->Width, dirty->Height, 0, 0, vscreen, xPos, yPos);
+			if (ballsUnion.Width <= 0)
+				ballsUnion = ball->DirtyRect;
+			else
+				maths::enclosing_box(&ballsUnion, &ball->DirtyRect, &ballsUnion);
+		}
+	}
+	if (ballsUnion.Width <= 0 || ballsUnion.Height <= 0)
+		return;
+
+	std::vector<render_sprite_type_struct*> unionSprites;
+	collect_sprites_for_rect(ballsUnion, unionSprites);
+	auto unionZ = new zmap_header_type(ballsUnion.Width, ballsUnion.Height, ballsUnion.Width);
+	build_z_for_region(ballsUnion, unionSprites, unionZ);
+
+	for (auto ball : ball_list)
+	{
+		auto dirty = &ball->DirtyRect;
+		if (dirty->Width > 0 && ball->Bmp)
+		{
 			zdrv::paint_flat(
 				dirty->Width,
 				dirty->Height,
 				vscreen,
-				xPos,
-				yPos,
-				zscreen,
-				xPos,
-				yPos,
+				dirty->XPosition,
+				dirty->YPosition,
+				unionZ,
+				dirty->XPosition - ballsUnion.XPosition,
+				dirty->YPosition - ballsUnion.YPosition,
 				ball->Bmp,
-				xPos - ball->BmpRect.XPosition,
-				yPos - ball->BmpRect.YPosition,
+				dirty->XPosition - ball->BmpRect.XPosition,
+				dirty->YPosition - ball->BmpRect.YPosition,
 				ball->Depth);
 
-			dirty_regions.push_back({
-				xPos,
-				yPos,
-				dirty->Width,
-				dirty->Height,
-			});
-		}
-		else
-		{
-			dirty->Width = -1;
+			dirty_regions.push_back(*dirty);
 		}
 	}
+
+	delete unionZ;
 }
 
 void render::unpaint_balls()
 {
-	// Restore portions of vScreen saved during previous paint_balls call.
-	for (int index = static_cast<int>(ball_list.size()) - 1; index >= 0; index--)
-	{
-		auto curBall = ball_list[index];
-		if (curBall->DirtyRect.Width > 0)
-		{
-			gdrv::copy_bitmap(
-				vscreen,
-				curBall->DirtyRect.Width,
-				curBall->DirtyRect.Height,
-				curBall->DirtyRect.XPosition,
-				curBall->DirtyRect.YPosition,
-				ball_bitmap[index],
-				0,
-				0);
-
-			dirty_regions.push_back({
-				curBall->DirtyRectPrev.XPosition,
-				curBall->DirtyRectPrev.YPosition,
-				curBall->DirtyRectPrev.Width,
-				curBall->DirtyRectPrev.Height,
-			});
-			dirty_regions.push_back({
-				curBall->DirtyRect.XPosition,
-				curBall->DirtyRect.YPosition,
-				curBall->DirtyRect.Width,
-				curBall->DirtyRect.Height,
-			});
-		}
-
-		curBall->DirtyRectPrev = curBall->DirtyRect;
-	}
 }
 
 void render::shift(int offsetX, int offsetY)
@@ -458,4 +548,9 @@ void render::build_occlude_list()
 	}
 
 	delete spriteArr;
+}
+
+void render::invalidate_all()
+{
+	full_redraw_pending = true;
 }

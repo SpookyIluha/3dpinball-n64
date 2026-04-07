@@ -24,6 +24,11 @@ public:
 	static void paint(int width, int height, gdrv_bitmap8* dstBmp, int dstBmpXOff, int dstBmpYOff,
 	                  zmap_header_type* dstZMap, int dstZMapXOff, int dstZMapYOff, gdrv_bitmap8* srcBmp, int srcBmpXOff,
 	                  int srcBmpYOff, zmap_header_type* srcZMap, int srcZMapXOff, int srcZMapYOff);
+	static void paint_depth(int width, int height, zmap_header_type* dstZMap, int dstZMapXOff, int dstZMapYOff,
+	                        zmap_header_type* srcZMap, int srcZMapXOff, int srcZMapYOff);
+	static void paint_depth_masked(int width, int height, zmap_header_type* dstZMap, int dstZMapXOff, int dstZMapYOff,
+	                               zmap_header_type* srcZMap, int srcZMapXOff, int srcZMapYOff,
+	                               gdrv_bitmap8* srcBmp, int srcBmpXOff, int srcBmpYOff);
 	static void paint_flat(int width, int height, gdrv_bitmap8* dstBmp, int dstBmpXOff, int dstBmpYOff,
 	                       zmap_header_type* zMap, int dstZMapXOff, int dstZMapYOff, gdrv_bitmap8* srcBmp,
 	                       int srcBmpXOff, int srcBmpYOff, uint16_t depth);

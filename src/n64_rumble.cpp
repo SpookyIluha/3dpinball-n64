@@ -57,7 +57,7 @@ void n64_rumble::Initialize()
 			supportedCount++;
 	}
 
-	debugf("n64_rumble: initialized, supported_ports=%d\n", supportedCount);
+	(void)supportedCount;
 }
 
 void n64_rumble::Update()

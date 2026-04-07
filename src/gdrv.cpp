@@ -8,6 +8,20 @@
 #include "winmain.h"
 
 ColorRgba gdrv::current_palette[256]{};
+uint16_t gdrv::current_palette_5551[256]{};
+
+namespace
+{
+	inline uint16_t PackRgba5551(const Rgba& c)
+	{
+		const uint16_t a = c.Alpha ? 1 : 0;
+		return static_cast<uint16_t>(
+			((c.Blue >> 3) << 11) |
+			((c.Green >> 3) << 6) |
+			((c.Red >> 3) << 1) |
+			a);
+	}
+}
 
 gdrv_bitmap8::gdrv_bitmap8(int width, int height, bool indexed)
 {
@@ -25,7 +39,7 @@ gdrv_bitmap8::gdrv_bitmap8(int width, int height, bool indexed)
 
 	if (indexed)
 		IndexedBmpPtr = new char[Height * IndexedStride];
-	BmpBufPtr1 = new ColorRgba[Height * Stride];
+	BmpBufPtr1 = new uint8_t[Height * Stride];
 }
 
 gdrv_bitmap8::gdrv_bitmap8(const dat8BitBmpHeader& header)
@@ -63,7 +77,7 @@ gdrv_bitmap8::gdrv_bitmap8(const dat8BitBmpHeader& header)
 	}
 
 	IndexedBmpPtr = new char[sizeInBytes];
-	BmpBufPtr1 = new ColorRgba[Stride * Height];
+	BmpBufPtr1 = new uint8_t[Stride * Height];
 }
 
 gdrv_bitmap8::~gdrv_bitmap8()
@@ -105,7 +119,7 @@ void gdrv_bitmap8::ScaleIndexed(float scaleX, float scaleY)
 	delete[] IndexedBmpPtr;
 	IndexedBmpPtr = newIndBuf;
 	delete[] BmpBufPtr1;
-	BmpBufPtr1 = new ColorRgba[Stride * Height];
+	BmpBufPtr1 = new uint8_t[Stride * Height];
 }
 
 int gdrv::display_palette(ColorRgba* plt)
@@ -129,6 +143,7 @@ int gdrv::display_palette(ColorRgba* plt)
 	for (int i = 0; i < 256; i++)
 	{
 		current_palette[i].rgba.Alpha = 0;
+		current_palette_5551[i] = 0;
 	}
 
 	auto pltSrc = &plt[10];
@@ -147,6 +162,10 @@ int gdrv::display_palette(ColorRgba* plt)
 	}
 
 	current_palette[255].Color = 0xffFFFFFF;
+	for (int i = 0; i < 256; i++)
+	{
+		current_palette_5551[i] = PackRgba5551(current_palette[i].rgba);
+	}
 
 	for (const auto group : pb::record_table->Groups)
 	{
@@ -165,12 +184,11 @@ int gdrv::display_palette(ColorRgba* plt)
 
 void gdrv::fill_bitmap(gdrv_bitmap8* bmp, int width, int height, int xOff, int yOff, uint8_t fillChar)
 {
-	auto color = current_palette[fillChar];
 	auto bmpPtr = &bmp->BmpBufPtr1[bmp->Width * yOff + xOff];
 	for (; height > 0; --height)
 	{
 		for (int x = width; x > 0; --x)
-			*bmpPtr++ = color;
+			*bmpPtr++ = fillChar;
 		bmpPtr += bmp->Stride - width;
 	}
 }
@@ -183,7 +201,7 @@ void gdrv::copy_bitmap(gdrv_bitmap8* dstBmp, int width, int height, int xOff, in
 
 	for (int y = height; y > 0; --y)
 	{
-		std::memcpy(dstPtr, srcPtr, width * sizeof(ColorRgba));
+		std::memcpy(dstPtr, srcPtr, width * sizeof(uint8_t));
 		srcPtr += srcBmp->Stride;
 		dstPtr += dstBmp->Stride;
 	}
@@ -199,7 +217,7 @@ void gdrv::copy_bitmap_w_transparency(gdrv_bitmap8* dstBmp, int width, int heigh
 	{
 		for (int x = width; x > 0; --x)
 		{
-			if ((*srcPtr).Color)
+			if (*srcPtr)
 				*dstPtr = *srcPtr;
 			++srcPtr;
 			++dstPtr;
@@ -222,14 +240,24 @@ void gdrv::ApplyPalette(gdrv_bitmap8& bmp)
 	assertm(bmp.BitmapType != BitmapTypes::Spliced, "gdrv: wrong bitmap type");
 	assertm(bmp.IndexedBmpPtr != nullptr, "gdrv: non-indexed bitmap");
 
-	// Apply palette, flip horizontally 
+	// Keep indexed pixels only, flip vertically to match previous path.
 	auto dst = bmp.BmpBufPtr1;
 	for (auto y = bmp.Height - 1; y >= 0; y--)
 	{
 		auto src = reinterpret_cast<uint8_t*>(bmp.IndexedBmpPtr) + bmp.IndexedStride * y;
 		for (auto x = 0; x < bmp.Width; x++)
 		{
-			*dst++ = current_palette[*src++];
+			*dst++ = *src++;
 		}
 	}
+}
+
+uint16_t gdrv::Palette5551(uint8_t colorIndex)
+{
+	return current_palette_5551[colorIndex];
+}
+
+const uint16_t* gdrv::Palette5551Table()
+{
+	return current_palette_5551;
 }

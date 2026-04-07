@@ -83,7 +83,6 @@ void Sound::SetChannels(int channels)
 	{
 		mixer_ch_set_vol(i, SfxVolume, SfxVolume);
 	}
-	debugf("Sound: configured SFX channels start=%d count=%d\n", sfx_channel_start, sfx_channel_count);
 }
 
 void Sound::PlaySound(uint8_t* buf, int time, int size, int samplerate)
@@ -118,14 +117,11 @@ void Sound::PlaySound(uint8_t* buf, int time, int size, int samplerate)
 	}
 
 	wav64_loadparms_t parms{};
-	parms.streaming_mode = WAV64_STREAMING_NONE;
+	parms.streaming_mode = WAV64_STREAMING_FULL;
 
 	auto* wave = wav64_load(handle->Path.c_str(), &parms);
 	if (!wave)
-	{
-		debugf("Sound: failed to load SFX for play '%s'\n", handle->Path.c_str());
 		return;
-	}
 
 	wav64_set_loop(wave, false);
 	wav64_play(wave, channel);
@@ -137,10 +133,7 @@ uint8_t* Sound::LoadWaveFile(const std::string& lpName)
 {
 	auto testFile = fopen(lpName.c_str(), "rb");
 	if (!testFile)
-	{
-		debugf("Sound: missing wav64 '%s'\n", lpName.c_str());
 		return nullptr;
-	}
 	fclose(testFile);
 
 	auto* handle = new WavHandle{};
@@ -155,7 +148,6 @@ uint8_t* Sound::LoadWaveFile(const std::string& lpName)
 	auto* probe = wav64_load(lpName.c_str(), &probeParms);
 	if (!probe)
 	{
-		debugf("Sound: wav64_load probe failed '%s'\n", lpName.c_str());
 		delete handle;
 		return nullptr;
 	}

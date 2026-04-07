@@ -89,6 +89,7 @@ int pb::init()
 		backgroundBmp,
 		0,
 		0);
+	render::background_bitmap = backgroundBmp;
 
 	loader::loadfrom(record_table);
 
@@ -130,6 +131,7 @@ void pb::reset_table()
 
 void pb::firsttime_setup()
 {
+	render::invalidate_all();
 	render::update();
 }
 

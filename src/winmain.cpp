@@ -41,10 +41,34 @@ int winmain::WinMain(LPCSTR lpCmdLine)
 {
 	(void)lpCmdLine;
 	std::set_new_handler(memalloc_failure);
-	debugf("winmain: boot start\n");
 
-	// CPU software blit path: avoid VI dedither, which is intended for RDP-dithered output.
-	display_init(RESOLUTION_640x480, DEPTH_16_BPP, 3, GAMMA_NONE, FILTERS_DISABLED);
+	const bool expandedPak = is_memory_expanded();
+	const int framebufferCount = expandedPak ? 3 : 2;
+
+	// Use native game render size as framebuffer; VI provides outer border area.
+	resolution_t videoMode = RESOLUTION_640x480;
+	videoMode.width = 600;
+	videoMode.height = 416;
+	videoMode.interlaced = INTERLACE_HALF;
+	videoMode.aspect_ratio = 4.0f / 3.0f;
+	videoMode.overscan_margin = 0.0f;
+	display_init(videoMode, DEPTH_16_BPP, framebufferCount, GAMMA_NONE, FILTERS_DEDITHER);
+	vi_borders_t borders{};
+	borders.left = 20;
+	borders.right = 20;
+	if (get_tv_type() == TV_PAL)
+	{
+		// PAL physical output has extra vertical lines, so use larger top/bottom borders.
+		borders.up = 80;
+		borders.down = 80;
+	}
+	else
+	{
+		borders.up = 32;
+		borders.down = 32;
+	}
+	vi_set_borders(borders);
+	rdpq_init();
 	joypad_init();
 	audio_init(44100, 4);
 	mixer_init(32);
@@ -54,7 +78,6 @@ int winmain::WinMain(LPCSTR lpCmdLine)
 		debugf("Failed to init DragonFS (rom:/)\n");
 		return 1;
 	}
-	debugf("winmain: DragonFS initialized\n");
 
 	n64_save::Initialize();
 	n64_graphics::Initialize();
@@ -65,7 +88,6 @@ int winmain::WinMain(LPCSTR lpCmdLine)
 	pinball::quickFlag = 0;
 	pb::FullTiltMode = false;
 	DatFileName = "PINBALL.DAT";
-	debugf("winmain: dat='%s' base='%s'\n", DatFileName.c_str(), BasePath);
 
 	auto pinballDat = fopen(pinball::make_path_name(DatFileName).c_str(), "rb");
 	if (!pinballDat)
@@ -78,19 +100,18 @@ int winmain::WinMain(LPCSTR lpCmdLine)
 	n64_graphics::SwapBuffers();
 
 	options::init();
-	if (!Sound::Init(Options.SoundChannels, Options.Sounds))
+	const int runtimeSoundChannels = expandedPak ? Options.SoundChannels : std::min(Options.SoundChannels, 4);
+	if (!Sound::Init(runtimeSoundChannels, Options.Sounds))
 		Options.Sounds = false;
-	debugf("winmain: sound init channels=%d enabled=%d\n", Options.SoundChannels, Options.Sounds ? 1 : 0);
 
 	if (!pinball::quickFlag && !midi::music_init())
 		Options.Music = false;
-	debugf("winmain: music enabled=%d\n", Options.Music ? 1 : 0);
 
 	if (pb::init())
 	{
 		PrintFatalError("Could not load game data:\n%s file is missing.\n", pinball::make_path_name(DatFileName).c_str());
 	}
-	debugf("winmain: pb::init complete\n");
+	n64_graphics::ReleaseStartupAssets();
 
 	pb::reset_table();
 	pb::firsttime_setup();
@@ -132,7 +153,7 @@ int winmain::WinMain(LPCSTR lpCmdLine)
 	Sound::Close();
 	n64_rumble::Shutdown();
 	n64_save::Shutdown();
-	debugf("winmain: shutdown complete\n");
+	rdpq_close();
 
 	return 0;
 }
@@ -201,5 +222,6 @@ void winmain::PrintFatalError(const char* message, ...)
 
 	n64_rumble::Shutdown();
 	n64_save::Shutdown();
+	rdpq_close();
 	std::abort();
 }
