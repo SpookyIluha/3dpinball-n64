@@ -96,9 +96,17 @@ void n64_graphics::SwapBuffers()
 		const int baseX = (dstW - Offscreen.width) / 2;
 		const int baseY = (dstH - Offscreen.height) / 2;
 
+		// Nudge code updates render offsets. Apply them at presentation so the table visibly "shakes".
+		const int shakeX = std::clamp(render::get_offset_x(), -12, 12);
+		const int shakeY = std::clamp(render::get_offset_y(), -8, 8);
+
 		rdpq_attach(CurrentSurface, nullptr);
 		rdpq_set_mode_copy(false);
-		rdpq_tex_blit(&Offscreen, static_cast<float>(baseX), static_cast<float>(baseY), nullptr);
+		rdpq_tex_blit(
+			&Offscreen,
+			static_cast<float>(baseX + shakeX),
+			static_cast<float>(baseY + shakeY),
+			nullptr);
 		rdpq_detach_show();
 	}
 	else

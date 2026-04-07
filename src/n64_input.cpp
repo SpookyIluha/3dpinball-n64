@@ -66,7 +66,7 @@ void n64_input::Clear()
 
 bool n64_input::Exit()
 {
-	return Held.start && Held.l && Held.r;
+	return Held.start && Held.b;
 }
 
 bool n64_input::Pause()
@@ -76,67 +76,67 @@ bool n64_input::Pause()
 
 bool n64_input::NewGame()
 {
-	return Held.start && Pressed.a;
+	return Pressed.b && !Held.start;
 }
 
 bool n64_input::LaunchBallDown()
 {
-	return !Held.b && (Pressed.d_down || Pressed.a);
+	return Pressed.a;
 }
 
 bool n64_input::LaunchBallUp()
 {
-	return !Held.b && (Released.d_down || Released.a);
+	return Released.a;
 }
 
 bool n64_input::MoveLeftPaddleDown()
 {
-	return !Held.b && (Pressed.d_left || Pressed.l || n64LeftTriggerDown);
+	return Pressed.l;
 }
 
 bool n64_input::MoveLeftPaddleUp()
 {
-	return !Held.b && (Released.d_left || Released.l || n64LeftTriggerUp);
+	return Released.l;
 }
 
 bool n64_input::MoveRightPaddleDown()
 {
-	return !Held.b && (Pressed.d_right || Pressed.r || n64RightTriggerDown);
+	return Pressed.r;
 }
 
 bool n64_input::MoveRightPaddleUp()
 {
-	return !Held.b && (Released.d_right || Released.r || n64RightTriggerUp);
+	return Released.r;
 }
 
 bool n64_input::NudgeLeftDown()
 {
-	return Held.b && Pressed.d_left;
+	return Pressed.d_left;
 }
 
 bool n64_input::NudgeLeftUp()
 {
-	return Held.b && Released.d_left;
+	return Released.d_left;
 }
 
 bool n64_input::NudgeRightDown()
 {
-	return Held.b && Pressed.d_right;
+	return Pressed.d_right;
 }
 
 bool n64_input::NudgeRightUp()
 {
-	return Held.b && Released.d_right;
+	return Released.d_right;
 }
 
 bool n64_input::NudgeUpDown()
 {
-	return Held.b && Pressed.d_up;
+	return Pressed.d_up;
 }
 
 bool n64_input::NudgeUpUp()
 {
-	return Held.b && Released.d_up;
+	return Released.d_up;
 }
 
 bool n64_input::Button1()
