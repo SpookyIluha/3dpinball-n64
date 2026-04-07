@@ -52,21 +52,13 @@ int winmain::WinMain(LPCSTR lpCmdLine)
 	videoMode.interlaced = INTERLACE_HALF;
 	videoMode.aspect_ratio = 4.0f / 3.0f;
 	videoMode.overscan_margin = 0.0f;
-	display_init(videoMode, DEPTH_16_BPP, framebufferCount, GAMMA_NONE, FILTERS_DEDITHER);
+	display_init(videoMode, DEPTH_16_BPP, framebufferCount, GAMMA_NONE, get_tv_type() == TV_PAL? FILTERS_RESAMPLE : FILTERS_DEDITHER);
 	vi_borders_t borders{};
 	borders.left = 20;
 	borders.right = 20;
-	if (get_tv_type() == TV_PAL)
-	{
-		// PAL physical output has extra vertical lines, so use larger top/bottom borders.
-		borders.up = 80;
-		borders.down = 80;
-	}
-	else
-	{
-		borders.up = 32;
-		borders.down = 32;
-	}
+	borders.up = 32;
+	borders.down = 32;
+
 	vi_set_borders(borders);
 	rdpq_init();
 	joypad_init();
