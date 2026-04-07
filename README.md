@@ -3,7 +3,7 @@
 N64 port of the Space Cadet pinball decompilation, using libdragon runtime and asset pipeline.
 Made from the Dreamcast version as a base. Plays Space Cadet only currently.
 
-Requires Expansion Pak to run.
+The Expansion Pak is not required.
 
 <img width="632" height="504" alt="image" src="https://github.com/user-attachments/assets/1e32b537-c395-4db2-bc46-6b1b9037cccf" />
 
@@ -23,13 +23,13 @@ libdragon make
 ```
 
 ## Controls
-- Left flipper: `D-Left` or `L`
-- Right flipper: `D-Right` or `R`
-- Launch ball: `A` or `D-Down`
-- Nudge mode: hold `B` + D-pad direction
+- Left flipper: `L`
+- Right flipper: `R`
+- Launch ball: `A`
+- Nudge mode: hold D-pad direction
 - Pause: `Start`
-- New game: `Start + A`
-- Exit: hold `Start + L + R`
+- New game: `B`
+- Exit: hold `Start + B`
 
 ## Save data
 - EEPROM save type default: `eeprom4k` (set in Makefile)
