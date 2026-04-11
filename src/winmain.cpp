@@ -126,6 +126,18 @@ int winmain::WinMain(LPCSTR lpCmdLine)
 			pause();
 		if (n64_input::NewGame())
 			new_game();
+		if (n64_input::ToggleMusic())
+		{
+			Options.Music ^= true;
+			if (!Options.Music)
+			{
+				midi::music_stop();
+			}
+			else if (!single_step)
+			{
+				midi::play_pb_theme();
+			}
+		}
 
 		pb::keydown();
 		pb::keyup();

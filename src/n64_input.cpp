@@ -79,6 +79,11 @@ bool n64_input::NewGame()
 	return Pressed.b && !Held.start;
 }
 
+bool n64_input::ToggleMusic()
+{
+	return Pressed.z;
+}
+
 bool n64_input::LaunchBallDown()
 {
 	return Pressed.a;
@@ -148,4 +153,3 @@ bool n64_input::Button2()
 {
 	return Pressed.b;
 }
-

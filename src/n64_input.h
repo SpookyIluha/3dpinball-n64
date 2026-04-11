@@ -10,6 +10,7 @@ public:
     static bool Exit();
     static bool Pause();
     static bool NewGame();
+    static bool ToggleMusic();
 
     static bool LaunchBallDown();
     static bool LaunchBallUp();

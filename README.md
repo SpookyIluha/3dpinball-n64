@@ -30,6 +30,7 @@ libdragon make
 - Pause: `Start`
 - New game: `Start + A`
 - Exit: hold `Start + L + R`
+- Toggle music: `Z`
 
 ## Save data
 - EEPROM save type default: `eeprom4k` (set in Makefile)
